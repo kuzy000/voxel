@@ -1,8 +1,8 @@
 use bevy::{
-    input::{keyboard::KeyboardInput, mouse::*},
+    input::mouse::*,
     prelude::*,
     render::{
-        camera::{camera_system, CameraProjection},
+        camera::CameraProjection,
         extract_component::{ExtractComponent, ExtractComponentPlugin},
         extract_resource::{ExtractResource, ExtractResourcePlugin},
         primitives::Frustum,
@@ -11,10 +11,8 @@ use bevy::{
         render_resource::*,
         renderer::{RenderContext, RenderDevice, RenderQueue},
         texture::ImageSampler,
-        view::ExtractedView,
         Extract, Render, RenderApp, RenderSet,
     },
-    utils::info,
     window::WindowPlugin,
 };
 use std::borrow::Cow;
@@ -39,29 +37,29 @@ fn main() {
             GameOfLifeComputePlugin,
         ))
         .add_systems(Startup, setup)
-        .add_systems(Update, update_camera)
+        //.add_systems(Update, update_camera)
         .add_systems(Update, update_game_camera)
         .run();
 }
 
-fn update_camera(
+fn _update_camera(
     buttons: Res<ButtonInput<MouseButton>>,
     mut motion_evr: EventReader<MouseMotion>,
     mut wheel_evr: EventReader<MouseWheel>,
     mut q: Query<(&mut Transform, &mut OrthographicProjection), With<Camera>>,
 ) {
-    //    let (mut transform, mut projection) = q.single_mut();
-    //
-    //    for ev in wheel_evr.read() {
-    //        projection.scale -= ev.y * 0.01f32;
-    //    }
-    //
-    //    if buttons.pressed(MouseButton::Right) {
-    //        for ev in motion_evr.read() {
-    //            transform.translation -=
-    //                Vec3::new(ev.delta.x, -ev.delta.y, 0f32) * 0.625f32 * projection.scale;
-    //        }
-    //    }
+    let (mut transform, mut projection) = q.single_mut();
+    
+    for ev in wheel_evr.read() {
+        projection.scale -= ev.y * 0.01f32;
+    }
+    
+    if buttons.pressed(MouseButton::Right) {
+        for ev in motion_evr.read() {
+            transform.translation -=
+                Vec3::new(ev.delta.x, -ev.delta.y, 0f32) * 0.625f32 * projection.scale;
+        }
+    }
 }
 
 fn update_game_camera(
@@ -78,39 +76,39 @@ fn update_game_camera(
     }
 
     let speed = if input.pressed(KeyCode::ShiftLeft) {
-        3.
+        15.
     } else {
-        1.
+        5.
     };
 
     let mut v = Vec3::ZERO;
 
-    let local_z = transform.local_z();
-    let forward = -Vec3::new(local_z.x, 0., local_z.z);
-    let right = Vec3::new(local_z.z, 0., -local_z.x);
+    let forward = -Vec3::from(transform.local_z());
+    let right = Vec3::from(transform.local_x());
+    let up = Vec3::from(transform.local_y());
 
     if input.pressed(KeyCode::KeyW) {
-        v += forward
+        v += forward;
     }
 
     if input.pressed(KeyCode::KeyS) {
-        v -= forward
+        v -= forward;
     }
 
     if input.pressed(KeyCode::KeyA) {
-        v -= right
+        v -= right;
     }
 
     if input.pressed(KeyCode::KeyD) {
-        v += right
-    }
-
-    if input.pressed(KeyCode::KeyE) {
-        v -= Vec3::Y
+        v += right;
     }
 
     if input.pressed(KeyCode::KeyQ) {
-        v += Vec3::Y
+        v -= up;
+    }
+
+    if input.pressed(KeyCode::KeyE) {
+        v += up;
     }
 
     let mut x = 0.;
@@ -125,7 +123,7 @@ fn update_game_camera(
 
     let factor = 0.01;
 
-    transform.translation += v * time.delta_seconds() * speed;
+    transform.translation += v.normalize_or_zero() * time.delta_seconds() * speed;
 
     let (yaw, pitch, _) = transform.rotation.to_euler(EulerRot::YXZ);
 
