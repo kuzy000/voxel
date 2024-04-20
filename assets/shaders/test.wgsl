@@ -12,6 +12,7 @@ struct View {
 
 @group(0) @binding(0) var texture: texture_storage_2d<rgba8unorm, read_write>;
 @group(0) @binding(1) var<uniform> view: View;
+@group(0) @binding(2) var cube: texture_storage_3d<rgba8unorm, read_write>;
 
 fn hash(value: u32) -> u32 {
     var state = value;
@@ -28,15 +29,21 @@ fn randomFloat(value: u32) -> f32 {
     return f32(hash(value)) / 4294967295.0;
 }
 
-@compute @workgroup_size(8, 8, 1)
+@compute @workgroup_size(8, 8, 8)
 fn init(@builtin(global_invocation_id) invocation_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
-    let location = vec2<i32>(i32(invocation_id.x), i32(invocation_id.y));
+    let location = vec3<i32>(invocation_id);
+    
+    let id = invocation_id;
+    let num = num_workgroups;
 
-    let randomNumber = randomFloat(invocation_id.y * num_workgroups.x + invocation_id.x);
-    let alive = randomNumber > 0.9;
-    let color = vec4<f32>(f32(alive));
+    let v = id.x * num.y * num.z + id.y * num.x + id.z;
 
-    textureStore(texture, location, color);
+    let randomNumber = randomFloat(v);
+
+    let alive = randomNumber > 0.95;
+    let color = vec4<f32>(f32(v % 2 == 0));
+
+    textureStore(cube, location, color);
 }
 
 fn is_alive(location: vec2<i32>, offset_x: i32, offset_y: i32) -> i32 {
@@ -66,9 +73,34 @@ fn sdf_sphere(p: vec3<f32>, r: f32) -> f32 {
     return length(p) - r;
 }
 
+fn sdf_box(p: vec3<f32>, b: vec3<f32>) -> f32 {
+    let q = abs(p) - b;
+    return length(max(q, vec3<f32>(0.0))) + min(max(q.x,max(q.y,q.z)),0.0);
+}
+
 fn sdf_round_box(p: vec3<f32>, b: vec3<f32>, r: f32) -> f32 {
     let q = abs(p) - b + r;
     return length(max(q, vec3<f32>(0.0))) + min(max(q.x,max(q.y,q.z)),0.0) - r;
+}
+
+fn sdf_cube_tex(p: vec3<f32>) -> f32 {
+    let size = 4;
+    
+    var res = 1e9;
+    
+    for (var x = 0; x < size; x++) {
+        for (var y = 0; y < size; y++) {
+            for (var z = 0; z < size; z++) {
+                let loc = vec3<i32>(x, y, z);
+                let value: vec4<f32> = textureLoad(cube, loc);
+                if (value.x > 0f) {
+                    res = min(res, sdf_box(p + vec3<f32>(loc), vec3<f32>(0.45f)));
+                }
+            }
+        }
+    }
+
+    return res;
 }
 
 fn sdf_world(p: vec3<f32>) -> f32 {
@@ -79,6 +111,7 @@ fn sdf_world(p: vec3<f32>) -> f32 {
     res = min(res, sdf_round_box(p, vec3<f32>(size), 0.1f));
     res = min(res, sdf_plane(p, vec3(0f, 1f, 0f), 1.));
     res = min(res, sdf_sphere(p - vec3(2f, 0f, 2f), 1.));
+    res = min(res, sdf_cube_tex(p - vec3(10f, 5f, 2f)));
     
 
     return res;

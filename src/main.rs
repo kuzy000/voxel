@@ -10,14 +10,15 @@ use bevy::{
         render_graph::{self, RenderGraph, RenderLabel},
         render_resource::*,
         renderer::{RenderContext, RenderDevice, RenderQueue},
-        texture::ImageSampler,
+        texture::{GpuImage, ImageSampler},
         Extract, Render, RenderApp, RenderSet,
     },
     window::WindowPlugin,
 };
 use std::borrow::Cow;
 
-const SIZE: (u32, u32) = (1280, 720);
+const SIZE: (u32, u32, u32) = (4, 4, 4);
+const SCREEN_SIZE: (u32, u32) = (1280, 720);
 const WORKGROUP_SIZE: u32 = 8;
 
 fn main() {
@@ -49,11 +50,11 @@ fn _update_camera(
     mut q: Query<(&mut Transform, &mut OrthographicProjection), With<Camera>>,
 ) {
     let (mut transform, mut projection) = q.single_mut();
-    
+
     for ev in wheel_evr.read() {
         projection.scale -= ev.y * 0.01f32;
     }
-    
+
     if buttons.pressed(MouseButton::Right) {
         for ev in motion_evr.read() {
             transform.translation -=
@@ -160,8 +161,8 @@ impl Default for GameCameraBundle {
 fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     let mut image = Image::new_fill(
         Extent3d {
-            width: SIZE.0,
-            height: SIZE.1,
+            width: SCREEN_SIZE.0,
+            height: SCREEN_SIZE.1,
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
@@ -175,9 +176,26 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
 
     let image = images.add(image);
 
+    let mut cube = Image::new_fill(
+        Extent3d {
+            width: SIZE.0,
+            height: SIZE.1,
+            depth_or_array_layers: SIZE.2,
+        },
+        TextureDimension::D3,
+        &[0, 0, 0, 255],
+        TextureFormat::Rgba8Unorm,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    cube.texture_descriptor.usage =
+        TextureUsages::COPY_DST | TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING;
+    cube.sampler = ImageSampler::nearest();
+
+    let cube = images.add(cube);
+
     commands.spawn(SpriteBundle {
         sprite: Sprite {
-            custom_size: Some(Vec2::new(SIZE.0 as f32, SIZE.1 as f32)),
+            custom_size: Some(Vec2::new(SCREEN_SIZE.0 as f32, SCREEN_SIZE.1 as f32)),
             ..default()
         },
         texture: image.clone(),
@@ -193,6 +211,7 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     commands.insert_resource(GameOfLifeImage {
         texture: image,
         view: Default::default(),
+        cube: cube,
     });
 }
 
@@ -255,6 +274,9 @@ struct GameOfLifeImage {
 
     #[uniform(1)]
     view: ViewUniform,
+
+    #[storage_texture(2, image_format = Rgba8Unorm, access = ReadWrite, dimension = "3d")]
+    cube: Handle<Image>,
 }
 
 #[derive(Resource)]
@@ -311,11 +333,12 @@ fn prepare_bind_group(
 ) {
     let view = gpu_images.get(&game_of_life_image.texture).unwrap();
     let u = view_uniforms.uniforms.binding().unwrap();
+    let cube = gpu_images.get(&game_of_life_image.cube).unwrap();
 
     let bind_group = render_device.create_bind_group(
         None,
         &pipeline.texture_bind_group_layout,
-        &BindGroupEntries::sequential((&view.texture_view, u)),
+        &BindGroupEntries::sequential((&view.texture_view, u, &cube.texture_view)),
     );
     commands.insert_resource(GameOfLifeImageBindGroup(bind_group));
 }
@@ -433,14 +456,22 @@ impl render_graph::Node for GameOfLifeNode {
                     .get_compute_pipeline(pipeline.init_pipeline)
                     .unwrap();
                 pass.set_pipeline(init_pipeline);
-                pass.dispatch_workgroups(SIZE.0 / WORKGROUP_SIZE, SIZE.1 / WORKGROUP_SIZE, 1);
+                pass.dispatch_workgroups(
+                    (SIZE.0 / WORKGROUP_SIZE).max(1),
+                    (SIZE.1 / WORKGROUP_SIZE).max(1),
+                    (SIZE.2 / WORKGROUP_SIZE).max(1),
+                );
             }
             GameOfLifeState::Update => {
                 let update_pipeline = pipeline_cache
                     .get_compute_pipeline(pipeline.update_pipeline)
                     .unwrap();
                 pass.set_pipeline(update_pipeline);
-                pass.dispatch_workgroups(SIZE.0 / WORKGROUP_SIZE, SIZE.1 / WORKGROUP_SIZE, 1);
+                pass.dispatch_workgroups(
+                    SCREEN_SIZE.0 / WORKGROUP_SIZE,
+                    SCREEN_SIZE.1 / WORKGROUP_SIZE,
+                    1,
+                );
             }
         }
 
