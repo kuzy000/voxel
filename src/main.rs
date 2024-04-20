@@ -1,8 +1,21 @@
-
 use bevy::{
-    diagnostic::FrameTimeDiagnosticsPlugin, input::mouse::*, prelude::*, render::{
-        extract_resource::{ExtractResource, ExtractResourcePlugin}, render_asset::{RenderAssetUsages, RenderAssets}, render_graph::{self, RenderGraph, RenderLabel}, render_resource::*, renderer::{RenderContext, RenderDevice}, texture::ImageSampler, Render, RenderApp, RenderSet
-    }, window::WindowPlugin
+    input::{keyboard::KeyboardInput, mouse::*},
+    prelude::*,
+    render::{
+        camera::{camera_system, CameraProjection},
+        extract_component::{ExtractComponent, ExtractComponentPlugin},
+        extract_resource::{ExtractResource, ExtractResourcePlugin},
+        primitives::Frustum,
+        render_asset::{RenderAssetUsages, RenderAssets},
+        render_graph::{self, RenderGraph, RenderLabel},
+        render_resource::*,
+        renderer::{RenderContext, RenderDevice, RenderQueue},
+        texture::ImageSampler,
+        view::ExtractedView,
+        Extract, Render, RenderApp, RenderSet,
+    },
+    utils::info,
+    window::WindowPlugin,
 };
 use std::borrow::Cow;
 
@@ -10,6 +23,8 @@ const SIZE: (u32, u32) = (1280, 720);
 const WORKGROUP_SIZE: u32 = 8;
 
 fn main() {
+    color_backtrace::install();
+
     App::new()
         .insert_resource(ClearColor(Color::BLACK))
         .add_plugins((
@@ -25,6 +40,7 @@ fn main() {
         ))
         .add_systems(Startup, setup)
         .add_systems(Update, update_camera)
+        .add_systems(Update, update_game_camera)
         .run();
 }
 
@@ -34,20 +50,114 @@ fn update_camera(
     mut wheel_evr: EventReader<MouseWheel>,
     mut q: Query<(&mut Transform, &mut OrthographicProjection), With<Camera>>,
 ) {
+    //    let (mut transform, mut projection) = q.single_mut();
+    //
+    //    for ev in wheel_evr.read() {
+    //        projection.scale -= ev.y * 0.01f32;
+    //    }
+    //
+    //    if buttons.pressed(MouseButton::Right) {
+    //        for ev in motion_evr.read() {
+    //            transform.translation -=
+    //                Vec3::new(ev.delta.x, -ev.delta.y, 0f32) * 0.625f32 * projection.scale;
+    //        }
+    //    }
+}
+
+fn update_game_camera(
+    time: Res<Time>,
+    input: Res<ButtonInput<KeyCode>>,
+    buttons: Res<ButtonInput<MouseButton>>,
+    mut motion_evr: EventReader<MouseMotion>,
+    mut q: Query<(&mut Transform, &mut Projection), With<GameCamera>>,
+) {
     let (mut transform, mut projection) = q.single_mut();
-    
-    for ev in wheel_evr.read() {
-        projection.scale -= ev.y * 0.01f32;
+
+    if let Projection::Perspective(ref mut p) = *projection {
+        p.aspect_ratio = 1280. / 720.;
     }
-    
+
+    let speed = if input.pressed(KeyCode::ShiftLeft) {
+        3.
+    } else {
+        1.
+    };
+
+    let mut v = Vec3::ZERO;
+
+    let local_z = transform.local_z();
+    let forward = -Vec3::new(local_z.x, 0., local_z.z);
+    let right = Vec3::new(local_z.z, 0., -local_z.x);
+
+    if input.pressed(KeyCode::KeyW) {
+        v += forward
+    }
+
+    if input.pressed(KeyCode::KeyS) {
+        v -= forward
+    }
+
+    if input.pressed(KeyCode::KeyA) {
+        v -= right
+    }
+
+    if input.pressed(KeyCode::KeyD) {
+        v += right
+    }
+
+    if input.pressed(KeyCode::KeyE) {
+        v -= Vec3::Y
+    }
+
+    if input.pressed(KeyCode::KeyQ) {
+        v += Vec3::Y
+    }
+
+    let mut x = 0.;
+    let mut y = 0.;
 
     if buttons.pressed(MouseButton::Right) {
         for ev in motion_evr.read() {
-            transform.translation -= Vec3::new(ev.delta.x, -ev.delta.y, 0f32) * 0.625f32 * projection.scale;
+            x += ev.delta.x;
+            y += ev.delta.y;
+        }
+    }
+
+    let factor = 0.01;
+
+    transform.translation += v * time.delta_seconds() * speed;
+
+    let (yaw, pitch, _) = transform.rotation.to_euler(EulerRot::YXZ);
+
+    let yaw = yaw - x * factor;
+    let pitch = pitch - y * factor;
+
+    transform.rotation = Quat::from_rotation_y(yaw) * Quat::from_rotation_x(pitch);
+}
+
+#[derive(Component, Clone, ExtractComponent)]
+struct GameCamera;
+
+#[derive(Bundle)]
+struct GameCameraBundle {
+    marker: GameCamera,
+    projection: Projection,
+    frustum: Frustum,
+    transform: Transform,
+    global_transform: GlobalTransform,
+}
+
+impl Default for GameCameraBundle {
+    fn default() -> Self {
+        Self {
+            marker: GameCamera,
+            projection: Default::default(),
+            frustum: Default::default(),
+            transform: Default::default(),
+            global_transform: Default::default(),
         }
     }
 }
-
 
 fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     let mut image = Image::new_fill(
@@ -77,7 +187,15 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     });
     commands.spawn(Camera2dBundle::default());
 
-    commands.insert_resource(GameOfLifeImage { texture: image });
+    commands.spawn(GameCameraBundle {
+        transform: Transform::from_xyz(5.0, 5.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+        ..Default::default()
+    });
+
+    commands.insert_resource(GameOfLifeImage {
+        texture: image,
+        view: Default::default(),
+    });
 }
 
 struct GameOfLifeComputePlugin;
@@ -90,11 +208,17 @@ impl Plugin for GameOfLifeComputePlugin {
         // Extract the game of life image resource from the main world into the render world
         // for operation on by the compute shader and display on the sprite.
         app.add_plugins(ExtractResourcePlugin::<GameOfLifeImage>::default());
+        app.add_plugins(ExtractComponentPlugin::<GameCamera>::default());
         let render_app = app.sub_app_mut(RenderApp);
+
+        render_app.add_systems(Render, prepare_view.in_set(RenderSet::PrepareResources));
+
         render_app.add_systems(
             Render,
             prepare_bind_group.in_set(RenderSet::PrepareBindGroups),
         );
+
+        render_app.add_systems(ExtractSchedule, extract_view);
 
         let mut render_graph = render_app.world.resource_mut::<RenderGraph>();
         render_graph.add_node(GameOfLifeLabel, GameOfLifeNode::default());
@@ -104,30 +228,96 @@ impl Plugin for GameOfLifeComputePlugin {
     fn finish(&self, app: &mut App) {
         let render_app = app.sub_app_mut(RenderApp);
         render_app.init_resource::<GameOfLifePipeline>();
+        render_app.init_resource::<ViewUniforms>();
     }
 }
 
-#[derive(Resource, Clone, Deref, ExtractResource, AsBindGroup)]
+#[derive(Clone, ShaderType, Default)]
+struct ViewUniform {
+    view_proj: Mat4,
+    inverse_view_proj: Mat4,
+    view: Mat4,
+    inverse_view: Mat4,
+    projection: Mat4,
+    inverse_projection: Mat4,
+    // viewport(x_origin, y_origin, width, height)
+    //    viewport: Vec4,
+    //    frustum: [Vec4; 6]
+}
+
+#[derive(Resource, Default)]
+struct ViewUniforms {
+    uniforms: UniformBuffer<ViewUniform>,
+}
+
+#[derive(Resource, Clone, ExtractResource, AsBindGroup)]
 struct GameOfLifeImage {
     #[storage_texture(0, image_format = Rgba8Unorm, access = ReadWrite)]
     texture: Handle<Image>,
+
+    #[uniform(1)]
+    view: ViewUniform,
 }
 
 #[derive(Resource)]
 struct GameOfLifeImageBindGroup(BindGroup);
+
+fn extract_view(
+    mut commands: Commands,
+    query: Extract<Query<(Entity, &Projection, &Transform), With<GameCamera>>>,
+) {
+    let (entity, proj, trs) = query.single();
+    let mut commands = commands.get_or_spawn(entity);
+
+    commands.insert(proj.clone());
+    commands.insert(trs.clone());
+}
+
+fn prepare_view(
+    mut view_uniforms: ResMut<ViewUniforms>,
+    render_device: Res<RenderDevice>,
+    render_queue: Res<RenderQueue>,
+    q: Query<(&Projection, &Transform), With<GameCamera>>,
+) {
+    let (proj, trs) = q.single();
+
+    let inverse_view = trs.compute_matrix();
+    let view = inverse_view.inverse();
+
+    let projection = proj.get_projection_matrix();
+    let view_proj = projection * view;
+
+    let view = ViewUniform {
+        view_proj,
+        inverse_view_proj: view_proj.inverse(),
+        view,
+        inverse_view,
+        projection: projection,
+        inverse_projection: projection.inverse(),
+    };
+
+    view_uniforms.uniforms.set(view);
+
+    view_uniforms
+        .uniforms
+        .write_buffer(&render_device, &render_queue);
+}
 
 fn prepare_bind_group(
     mut commands: Commands,
     pipeline: Res<GameOfLifePipeline>,
     gpu_images: Res<RenderAssets<Image>>,
     game_of_life_image: Res<GameOfLifeImage>,
+    view_uniforms: Res<ViewUniforms>,
     render_device: Res<RenderDevice>,
 ) {
     let view = gpu_images.get(&game_of_life_image.texture).unwrap();
+    let u = view_uniforms.uniforms.binding().unwrap();
+
     let bind_group = render_device.create_bind_group(
         None,
         &pipeline.texture_bind_group_layout,
-        &BindGroupEntries::single(&view.texture_view),
+        &BindGroupEntries::sequential((&view.texture_view, u)),
     );
     commands.insert_resource(GameOfLifeImageBindGroup(bind_group));
 }
@@ -143,9 +333,7 @@ impl FromWorld for GameOfLifePipeline {
     fn from_world(world: &mut World) -> Self {
         let render_device = world.resource::<RenderDevice>();
         let texture_bind_group_layout = GameOfLifeImage::bind_group_layout(render_device);
-        let shader = world
-            .resource::<AssetServer>()
-            .load("shaders/game_of_life.wgsl");
+        let shader = world.resource::<AssetServer>().load("shaders/test.wgsl");
         let pipeline_cache = world.resource::<PipelineCache>();
         let init_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
             label: None,
@@ -172,6 +360,7 @@ impl FromWorld for GameOfLifePipeline {
     }
 }
 
+#[derive(Debug)]
 enum GameOfLifeState {
     Loading,
     Init,
@@ -211,7 +400,14 @@ impl render_graph::Node for GameOfLifeNode {
                     self.state = GameOfLifeState::Update;
                 }
             }
-            GameOfLifeState::Update => {}
+            GameOfLifeState::Update => {
+                if pipeline_cache
+                    .get_compute_pipeline(pipeline.update_pipeline)
+                    .is_none()
+                {
+                    self.state = GameOfLifeState::Loading;
+                }
+            }
         }
     }
 
