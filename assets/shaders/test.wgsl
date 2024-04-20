@@ -41,7 +41,7 @@ fn init(@builtin(global_invocation_id) invocation_id: vec3<u32>, @builtin(num_wo
     let randomNumber = randomFloat(v);
 
     let alive = randomNumber > 0.95;
-    let color = vec4<f32>(f32(v % 2 == 0));
+    let color = vec4<f32>(f32(v % 2u == 0u));
 
     textureStore(cube, location, color);
 }
@@ -94,7 +94,7 @@ fn sdf_cube_tex(p: vec3<f32>) -> f32 {
                 let loc = vec3<i32>(x, y, z);
                 let value: vec4<f32> = textureLoad(cube, loc);
                 if (value.x > 0f) {
-                    res = min(res, sdf_box(p + vec3<f32>(loc), vec3<f32>(0.45f)));
+                    res = min(res, sdf_box(p + vec3<f32>(loc), vec3<f32>(0.5f)));
                 }
             }
         }
@@ -108,10 +108,11 @@ fn sdf_world(p: vec3<f32>) -> f32 {
 
     var res: f32 = 1e9;
 
-    res = min(res, sdf_round_box(p, vec3<f32>(size), 0.1f));
-    res = min(res, sdf_plane(p, vec3(0f, 1f, 0f), 1.));
-    res = min(res, sdf_sphere(p - vec3(2f, 0f, 2f), 1.));
-    res = min(res, sdf_cube_tex(p - vec3(10f, 5f, 2f)));
+    res = min(res, sdf_plane(p, vec3(0f, 1f, 0f), 5.));
+    // res = min(res, sdf_round_box(p, vec3<f32>(size), 0.1f));
+    // res = min(res, sdf_sphere(p - vec3(2f, 0f, 2f), 1.));
+    // res = min(res, sdf_cube_tex(p - vec3(10f, 5f, 2f)));
+    res = min(res, sdf_cube_tex(p));
     
 
     return res;
@@ -153,6 +154,48 @@ fn ray_march(ro: vec3<f32>, rd: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(0.f);
 }
 
+const VOXEL_SIZE: f32 = 1.;
+const MAX_STEPS: i32 = 128;
+
+// fn get_voxel(ipos: vec3<i32>) -> bool {
+//     let p = vec3<f32>(ipos) + vec3(0.5);
+//     let d = min(max(-sdf_sphere(p, 7.5), sdf_box(p, vec3(6.0))), -sdf_sphere(p, 25.0));
+//     return d < 0.;
+// }
+
+fn get_voxel(ipos: vec3<i32>) -> bool {
+    return textureLoad(cube, ipos).x > 0.;
+}
+
+// Branchless Voxel Raycasting
+// https://www.shadertoy.com/view/4dX3zl
+// http://www.cse.yorku.ca/~amana/research/grid.pdf
+fn traverse(pos: vec3<f32>, dir: vec3<f32>) -> vec3<f32> {
+    var ipos = vec3<i32>(floor(pos));
+    let istep = vec3<i32>(sign(dir));
+    
+    //let delta = abs(vec3(length(dir)) / dir);
+    let delta = abs(1. / dir);
+    var tmax = (sign(dir) * (vec3<f32>(ipos) - pos) + (sign(dir) * 0.5) + 0.5) * delta;
+    
+    var mask = vec3<bool>(false);
+    
+    for (var i = 0; i < MAX_STEPS; i++) {
+        if (get_voxel(ipos)) {
+            let normal = -normalize(vec3<f32>(mask) * vec3<f32>(istep));
+            let color = normal * .5 + .5;
+            return color;
+        }
+
+        mask = tmax.xyz <= min(tmax.yzx, tmax.zxy);
+        
+        tmax += vec3<f32>(mask) * delta;
+        ipos += vec3<i32>(mask) * istep;
+    }
+    
+    return vec3<f32>(0.f);
+}
+
 @compute @workgroup_size(8, 8, 1)
 fn update(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let location = vec2<i32>(i32(invocation_id.x), i32(invocation_id.y));
@@ -175,8 +218,11 @@ fn update(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     // let forward = (view.inverse_view * vec4(0f, 0f, -1f, 0f)).xyz;
     // 
     // let rd = right * uv.x + up * uv.y + forward;
+    
+    let pos = a;
+    let dir = rd;
 
-    let c = ray_march(a, rd);
+    let c = traverse(pos, dir);
 
     let color = vec4<f32>(c, 1.f);
 

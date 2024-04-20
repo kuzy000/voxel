@@ -204,7 +204,7 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     commands.spawn(Camera2dBundle::default());
 
     commands.spawn(GameCameraBundle {
-        transform: Transform::from_xyz(5.0, 5.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+        transform: Transform::from_xyz(10.0, 5.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
         ..Default::default()
     });
 
