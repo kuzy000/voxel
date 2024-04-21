@@ -13,7 +13,7 @@ struct View {
 const VOXEL_SIZE: f32 = 1.0f;
 const VOXEL_DIM: i32 = 4;
 const VOXEL_COUNT: i32 = VOXEL_DIM * VOXEL_DIM * VOXEL_DIM;
-const VOXEL_TREE_DEPTH: i32 = 2;
+const VOXEL_TREE_DEPTH: i32 = 4;
 
 struct Voxel {
     value: u32,
@@ -405,15 +405,20 @@ fn is_inside(pos: vec3f, a: vec3f, b: vec3f) -> bool {
     return true;
 }
 
-// try to remove me
+// TODO: try to remove me
 const BIAS: f32 = 0.01f;
+
+fn get_voxel_size(depth: u32) -> f32 {
+    // TODO: rewrite with loop?
+    return VOXEL_SIZE * f32(pow(f32(VOXEL_DIM), f32(u32(VOXEL_TREE_DEPTH) - depth)));
+}
 
 fn ray_march_voxel(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
     var frames: array<RayMarchFrame, VOXEL_TREE_DEPTH>;
     
     var inter_t = 0.f;
-    if (!is_inside(pos, vec3f(0.), vec3f(VOXEL_SIZE * f32(VOXEL_DIM * VOXEL_DIM)))) {
-        let intersection = ray_bbox(pos, dir, vec3f(0.), vec3f(VOXEL_SIZE * f32(VOXEL_DIM * VOXEL_DIM)));
+    if (!is_inside(pos, vec3f(0.), vec3f(get_voxel_size(0u)))) {
+        let intersection = ray_bbox(pos, dir, vec3f(0.), vec3f(get_voxel_size(0u)));
         if (!intersection.has) {
             return RayMarchResult(vec3<f32>(), vec3<f32>(), 1e9f);
         }
@@ -426,10 +431,10 @@ fn ray_march_voxel(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
     var depth = 0;
 
     // TODO remove it it. It should already be inside the box
-    let global_pos = clamp(in_pos0, vec3f(0.), vec3f(VOXEL_SIZE * f32(VOXEL_DIM * VOXEL_DIM)));
+    let global_pos = clamp(in_pos0, vec3f(0.), vec3f(get_voxel_size(0u)));
 
     // Apply offset and scale as if `voxel_size = 1.f`
-    frames[depth].local_pos = global_pos / (VOXEL_SIZE * f32(VOXEL_DIM));
+    frames[depth].local_pos = global_pos / get_voxel_size(1u);
 
     frames[depth].index = 0u;
     frames[depth].ipos = vec3<i32>(floor(frames[depth].local_pos));
@@ -454,7 +459,7 @@ fn ray_march_voxel(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
 
     for (var i = 0; i < MAX_STEPS; i++) {
         let ipos = frames[depth].ipos;
-        if (ipos.x < 0 || ipos.x >= 4 || ipos.y < 0 || ipos.y >= 4 || ipos.z < 0 || ipos.z >= 4) {
+        if (ipos.x < 0 || ipos.x >= VOXEL_DIM || ipos.y < 0 || ipos.y >= VOXEL_DIM || ipos.z < 0 || ipos.z >= VOXEL_DIM) {
             if (depth == 0) {
                 break;
             }
@@ -481,7 +486,7 @@ fn ray_march_voxel(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
                 
                 var distance = 0.f;
                 var voxel_size = VOXEL_SIZE;
-                for (var j = VOXEL_TREE_DEPTH -1; j >= 0; j--) {
+                for (var j = VOXEL_TREE_DEPTH - 1; j >= 0; j--) {
                     let tmax = frames[j].tmax_prev;
                     distance += min(tmax.x, min(tmax.y, tmax.z)) * voxel_size + inter_t;
                     voxel_size *= f32(VOXEL_DIM);
@@ -492,12 +497,11 @@ fn ray_march_voxel(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
         }
         else {
             let index = frames[depth].index;
-            if (get_voxel_nodes(index, frames[depth].ipos)) {
-                let ipos = frames[depth].ipos;
+            let ipos = frames[depth].ipos;
+            if (get_voxel_nodes(index, ipos)) {
                 let tmax = frames[depth].tmax;
                 let tmax_prev = frames[depth].tmax_prev;
                 let local_pos = frames[depth].local_pos;
-                let voxel_size = VOXEL_SIZE * f32(pow(f32(VOXEL_DIM), f32(VOXEL_TREE_DEPTH - depth - 1)));
                 let distance = min(tmax_prev.x, min(tmax_prev.y, tmax_prev.z));
                 
                 // TODO try remove bias
@@ -513,13 +517,15 @@ fn ray_march_voxel(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
                 frames[depth].tmax_prev = vec3f();
 
                 let nipos = frames[depth].ipos;
+                let nindex = frames[depth].index;
                 let nlocal_pos = frames[depth].local_pos;
                 let ntmax = frames[depth].tmax;
 
-                //if (nlocal_pos.x >= 0) {
-                //    let color = vec3f(nipos) / 4;
-                //    return RayMarchResult(vec3f(), color, 0f);
-                //}
+                // if (nlocal_pos.x >= 0 && depth == 1) {
+                //     let m = voxel_nodes[nindex].mask[1];
+                //     let color = vec3f(m);
+                //     return RayMarchResult(vec3f(), color, 0f);
+                // }
 
                 continue;
             }

@@ -1,5 +1,8 @@
 use bevy::{
-    ecs::system::{lifetimeless::SRes, SystemParamItem},
+    ecs::{
+        system::{lifetimeless::SRes, SystemParamItem},
+        world::error,
+    },
     input::mouse::*,
     prelude::*,
     render::{
@@ -89,9 +92,9 @@ fn update_game_camera(
     }
 
     let speed = if input.pressed(KeyCode::ShiftLeft) {
-        15.
+        50.
     } else {
-        5.
+        15.
     };
 
     let mut v = Vec3::ZERO;
@@ -207,15 +210,17 @@ fn setup(
         ..Default::default()
     });
 
-    let voxel_tree = gen_voxel_tree(
-        1,
-        &|v| {
-            let v = Vec3::new(v.x as f32, v.y as f32, v.z as f32) / ((VOXEL_DIM * VOXEL_DIM - 1) as f32);
-            let v = v * 2f32 - 1f32;
+    const DEPTH: u8 = 4;
 
-            v.length() <= 1.
-        }
-    );
+    let voxel_tree = gen_voxel_tree(DEPTH, &|v| {
+        //v.x >= 63
+        let v = Vec3::new(v.x as f32, v.y as f32, v.z as f32) / ((VOXEL_DIM.pow(DEPTH as u32) - 1) as f32);
+        let v = v * 2f32 - 1f32;
+
+        v.length() <= 1.
+    });
+
+    // voxel_tree.debug_print();
 
     let voxel_tree = voxel_trees.add(voxel_tree);
 
@@ -258,7 +263,13 @@ fn gen_voxel_leaf(offset: IVec3, f: &impl Fn(IVec3) -> bool) -> Option<VoxelLeaf
     }
 }
 
-fn gen_voxel_node(tree: &mut VoxelTree, offset: IVec3, depth: u8, max_depth: u8, f: &impl Fn(IVec3) -> bool) -> bool {
+fn gen_voxel_node(
+    tree: &mut VoxelTree,
+    offset: IVec3,
+    depth: u8,
+    leaf_depth: u8,
+    f: &impl Fn(IVec3) -> bool,
+) -> Option<u32> {
     let idx_cur = tree.nodes.len();
     tree.nodes.push(Default::default());
 
@@ -274,17 +285,16 @@ fn gen_voxel_node(tree: &mut VoxelTree, offset: IVec3, depth: u8, max_depth: u8,
                 let index = pos_to_idx(v);
                 let offset = (offset + v) * IVec3::splat(VOXEL_DIM as i32);
 
-                if depth == max_depth - 1 {
+                if depth == leaf_depth - 1 {
                     if let Some(leaf) = gen_voxel_leaf(offset, f) {
                         tree.nodes[idx_cur].indices[index as usize] = tree.leafs.len() as u32;
                         tree.leafs.push(leaf);
 
                         mask |= 1u64 << index
                     }
-                }
-                else {
-                    if gen_voxel_node(tree, offset, depth + 1, max_depth, f) {
-                        tree.nodes[idx_cur].indices[index as usize] = tree.nodes.len() as u32;
+                } else {
+                    if let Some(idx) = gen_voxel_node(tree, offset, depth + 1, leaf_depth, f) {
+                        tree.nodes[idx_cur].indices[index as usize] = idx;
 
                         mask |= 1u64 << index
                     }
@@ -296,18 +306,18 @@ fn gen_voxel_node(tree: &mut VoxelTree, offset: IVec3, depth: u8, max_depth: u8,
     if mask != 0 {
         tree.nodes[idx_cur].mask = [mask as u32, (mask >> 32) as u32];
 
-        return true;
+        return Some(idx_cur as u32);
     } else {
         assert_eq!(idx_cur, tree.nodes.len() - 1);
         tree.nodes.pop();
 
-        return false;
+        return None;
     }
 }
 
 fn gen_voxel_tree(depth: u8, f: &impl Fn(IVec3) -> bool) -> VoxelTree {
     let mut res = VoxelTree::default();
-    gen_voxel_node(&mut res, IVec3::ZERO, 0, depth, f);
+    gen_voxel_node(&mut res, IVec3::ZERO, 0, depth - 1, f);
 
     res
 }
@@ -392,6 +402,29 @@ struct VoxelNode {
     indices: [u32; VOXEL_COUNT],
 }
 
+impl VoxelNode {
+    fn debug_print(&self, self_idx: usize, depth: usize, tree: &VoxelTree) {
+        let mask: u64 = ((self.mask[1] as u64) << 32) | (self.mask[0] as u64);
+
+        error!("{:indent$}Node: {}", "", self_idx, indent = depth * 2);
+        error!("{:indent$}Indices: {:?}", "", self.indices, indent = (depth + 1) * 2);
+        if depth == 1 {
+            return;
+        }
+
+        for i in 0..64 {
+            if mask & (1u64 << i) == 0 {
+                continue;
+            }
+            error!("{:indent$}Idx: {}", "", i, indent = (depth + 1) * 2);
+            
+            let nidx = self.indices[i as usize] as usize;
+
+            tree.nodes[nidx].debug_print(nidx, depth + 1, tree);
+        }
+    }
+}
+
 impl Default for VoxelNode {
     fn default() -> Self {
         Self {
@@ -405,6 +438,14 @@ impl Default for VoxelNode {
 struct VoxelTree {
     leafs: Vec<VoxelLeaf>,
     nodes: Vec<VoxelNode>,
+}
+
+impl VoxelTree {
+    fn debug_print(&self) {
+        error!("Num of nodes: {}", self.nodes.len());
+
+        self.nodes[0].debug_print(0, 0, self);
+    }
 }
 
 #[derive(Resource, Default)]
