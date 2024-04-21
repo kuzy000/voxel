@@ -12,7 +12,7 @@ struct View {
 
 @group(0) @binding(0) var texture: texture_storage_2d<rgba8unorm, read_write>;
 @group(0) @binding(1) var<uniform> view: View;
-@group(0) @binding(2) var cube: texture_storage_3d<rgba8unorm, read_write>;
+@group(0) @binding(2) var<storage, read_write> voxel_tree: array<u32>;
 
 fn hash(value: u32) -> u32 {
     var state = value;
@@ -43,7 +43,7 @@ fn init(@builtin(global_invocation_id) invocation_id: vec3<u32>, @builtin(num_wo
     let alive = randomNumber > 0.95;
     let color = vec4<f32>(f32(v % 2u == 0u));
 
-    textureStore(cube, location, color);
+    voxel_tree[v] = u32(v % 2u == 0u);
 }
 
 fn is_alive(location: vec2<i32>, offset_x: i32, offset_y: i32) -> i32 {
@@ -88,17 +88,17 @@ fn sdf_cube_tex(p: vec3<f32>) -> f32 {
     
     var res = 1e9;
     
-    for (var x = 0; x < size; x++) {
-        for (var y = 0; y < size; y++) {
-            for (var z = 0; z < size; z++) {
-                let loc = vec3<i32>(x, y, z);
-                let value: vec4<f32> = textureLoad(cube, loc);
-                if (value.x > 0f) {
-                    res = min(res, sdf_box(p + vec3<f32>(loc), vec3<f32>(0.5f)));
-                }
-            }
-        }
-    }
+//    for (var x = 0; x < size; x++) {
+//        for (var y = 0; y < size; y++) {
+//            for (var z = 0; z < size; z++) {
+//                let loc = vec3<i32>(x, y, z);
+//                let value: vec4<f32> = textureLoad(cube, loc);
+//                if (value.x > 0f) {
+//                    res = min(res, sdf_box(p + vec3<f32>(loc), vec3<f32>(0.5f)));
+//                }
+//            }
+//        }
+//    }
 
     return res;
 }
@@ -164,7 +164,14 @@ const MAX_STEPS: i32 = 128;
 // }
 
 fn get_voxel(ipos: vec3<i32>) -> bool {
-    return textureLoad(cube, ipos).x > 0.;
+    if (ipos.x < 0 || ipos.x >= 4) { return false; }
+    if (ipos.y < 0 || ipos.y >= 4) { return false; }
+    if (ipos.z < 0 || ipos.z >= 4) { return false; }
+
+    let i = ipos.x * 4 * 4 + ipos.y * 4 + ipos.z;
+    
+    let v = voxel_tree[i];
+    return v > 0u;
 }
 
 // Branchless Voxel Raycasting

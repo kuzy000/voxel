@@ -1,16 +1,22 @@
 use bevy::{
+    ecs::system::{lifetimeless::SRes, SystemParamItem},
     input::mouse::*,
     prelude::*,
     render::{
+        self,
         camera::CameraProjection,
         extract_component::{ExtractComponent, ExtractComponentPlugin},
         extract_resource::{ExtractResource, ExtractResourcePlugin},
         primitives::Frustum,
-        render_asset::{RenderAssetUsages, RenderAssets},
+        render_asset::{PrepareAssetError, RenderAsset, RenderAssetPlugin, RenderAssetUsages, RenderAssets},
         render_graph::{self, RenderGraph, RenderLabel},
-        render_resource::*,
+        render_resource::{
+            binding_types::{storage_buffer, texture_storage_2d, uniform_buffer},
+            encase::ArrayLength,
+            *,
+        },
         renderer::{RenderContext, RenderDevice, RenderQueue},
-        texture::{GpuImage, ImageSampler},
+        texture::ImageSampler,
         Extract, Render, RenderApp, RenderSet,
     },
     window::WindowPlugin,
@@ -158,7 +164,11 @@ impl Default for GameCameraBundle {
     }
 }
 
-fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
+fn setup(
+    mut commands: Commands,
+    mut images: ResMut<Assets<Image>>,
+    mut voxel_trees: ResMut<Assets<VoxelTree>>,
+) {
     let mut image = Image::new_fill(
         Extent3d {
             width: SCREEN_SIZE.0,
@@ -176,23 +186,6 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
 
     let image = images.add(image);
 
-    let mut cube = Image::new_fill(
-        Extent3d {
-            width: SIZE.0,
-            height: SIZE.1,
-            depth_or_array_layers: SIZE.2,
-        },
-        TextureDimension::D3,
-        &[0, 0, 0, 255],
-        TextureFormat::Rgba8Unorm,
-        RenderAssetUsages::RENDER_WORLD,
-    );
-    cube.texture_descriptor.usage =
-        TextureUsages::COPY_DST | TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING;
-    cube.sampler = ImageSampler::nearest();
-
-    let cube = images.add(cube);
-
     commands.spawn(SpriteBundle {
         sprite: Sprite {
             custom_size: Some(Vec2::new(SCREEN_SIZE.0 as f32, SCREEN_SIZE.1 as f32)),
@@ -208,10 +201,15 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
         ..Default::default()
     });
 
+    let data = (0..64).map(|i| (i % 2) as u32);
+
+    let voxel_tree = VoxelTree { buffer: data.collect() };
+    let voxel_tree = voxel_trees.add(voxel_tree);
+
     commands.insert_resource(GameOfLifeImage {
         texture: image,
         view: Default::default(),
-        cube: cube,
+        voxel_tree: voxel_tree,
     });
 }
 
@@ -225,7 +223,9 @@ impl Plugin for GameOfLifeComputePlugin {
         // Extract the game of life image resource from the main world into the render world
         // for operation on by the compute shader and display on the sprite.
         app.add_plugins(ExtractResourcePlugin::<GameOfLifeImage>::default());
+        app.add_plugins(RenderAssetPlugin::<VoxelTree>::default());
         app.add_plugins(ExtractComponentPlugin::<GameCamera>::default());
+        app.init_asset::<VoxelTree>();
         let render_app = app.sub_app_mut(RenderApp);
 
         render_app.add_systems(Render, prepare_view.in_set(RenderSet::PrepareResources));
@@ -267,16 +267,94 @@ struct ViewUniforms {
     uniforms: UniformBuffer<ViewUniform>,
 }
 
-#[derive(Resource, Clone, ExtractResource, AsBindGroup)]
+#[derive(Asset, Reflect, Clone, Default, ShaderType)]
+struct VoxelTree {
+    #[size(runtime)]
+    buffer: Vec<u32>,
+}
+
+#[derive(Resource, Default)]
+struct GpuVoxelTree {
+    buffer: StorageBuffer<Vec<u32>>,
+}
+
+impl RenderAsset for VoxelTree {
+    type PreparedAsset = GpuVoxelTree;
+    type Param = (SRes<RenderDevice>, SRes<RenderQueue>);
+
+    fn asset_usage(&self) -> RenderAssetUsages {
+        RenderAssetUsages::RENDER_WORLD
+    }
+
+    /// Converts the extracted image into a [`GpuImage`].
+    fn prepare_asset(
+        self,
+        (device, queue): &mut SystemParamItem<Self::Param>,
+    ) -> Result<Self::PreparedAsset, PrepareAssetError<Self>> {
+        let mut buffer = StorageBuffer::default();
+        buffer.set(self.buffer.clone());
+        buffer.write_buffer(device, queue);
+
+        Ok(GpuVoxelTree { buffer })
+    }
+}
+
+#[derive(Resource, Clone, ExtractResource)]
 struct GameOfLifeImage {
-    #[storage_texture(0, image_format = Rgba8Unorm, access = ReadWrite)]
     texture: Handle<Image>,
-
-    #[uniform(1)]
     view: ViewUniform,
+    voxel_tree: Handle<VoxelTree>,
+}
 
-    #[storage_texture(2, image_format = Rgba8Unorm, access = ReadWrite, dimension = "3d")]
-    cube: Handle<Image>,
+impl GameOfLifeImage {
+    fn as_bind_group(
+        &self,
+        layout: &BindGroupLayout,
+        render_device: &RenderDevice,
+        images: &RenderAssets<Image>,
+        voxel_trees: &RenderAssets<VoxelTree>,
+        view_uniforms: &ViewUniforms,
+    ) -> Result<BindGroup, AsBindGroupError> {
+        let texture = images
+            .get(self.texture.clone())
+            .ok_or(AsBindGroupError::RetryNextUpdate)?;
+
+        let view = view_uniforms
+            .uniforms
+            .binding()
+            .ok_or(AsBindGroupError::RetryNextUpdate)?;
+
+        let voxel_tree = voxel_trees
+            .get(self.voxel_tree.clone())
+            .ok_or(AsBindGroupError::RetryNextUpdate)?;
+
+        let voxel_tree = voxel_tree
+            .buffer
+            .binding()
+            .ok_or(AsBindGroupError::RetryNextUpdate)?;
+
+        let res = render_device.create_bind_group(
+            "voxel_tree_group",
+            layout,
+            &BindGroupEntries::sequential((&texture.texture_view, view, voxel_tree)),
+        );
+
+        Ok(res)
+    }
+
+    fn bind_group_layout(render_device: &RenderDevice) -> BindGroupLayout {
+        render_device.create_bind_group_layout(
+            "voxel_tree_layout",
+            &BindGroupLayoutEntries::sequential(
+                ShaderStages::COMPUTE,
+                (
+                    texture_storage_2d(TextureFormat::Rgba8Unorm, StorageTextureAccess::ReadWrite),
+                    uniform_buffer::<ViewUniform>(false),
+                    storage_buffer::<VoxelTree>(false),
+                ),
+            ),
+        )
+    }
 }
 
 #[derive(Resource)]
@@ -327,19 +405,28 @@ fn prepare_bind_group(
     mut commands: Commands,
     pipeline: Res<GameOfLifePipeline>,
     gpu_images: Res<RenderAssets<Image>>,
+    gpu_voxel_tress: Res<RenderAssets<VoxelTree>>,
     game_of_life_image: Res<GameOfLifeImage>,
     view_uniforms: Res<ViewUniforms>,
     render_device: Res<RenderDevice>,
 ) {
-    let view = gpu_images.get(&game_of_life_image.texture).unwrap();
-    let u = view_uniforms.uniforms.binding().unwrap();
-    let cube = gpu_images.get(&game_of_life_image.cube).unwrap();
+    // let view = gpu_images.get(&game_of_life_image.texture).unwrap();
+    // let u = view_uniforms.uniforms.binding().unwrap();
+    // let voxel_tree = gpu_voxel_tress.get(&game_of_life_image.cube).unwrap();
 
-    let bind_group = render_device.create_bind_group(
-        None,
+    // let bind_group =  render_device.create_bind_group(
+    //     None,
+    //     &pipeline.texture_bind_group_layout,
+    //     &BindGroupEntries::sequential((&view.texture_view, u, &cube.texture_view)),
+    // );
+    let bind_group = game_of_life_image.as_bind_group(
         &pipeline.texture_bind_group_layout,
-        &BindGroupEntries::sequential((&view.texture_view, u, &cube.texture_view)),
-    );
+        &render_device,
+        &gpu_images,
+        &gpu_voxel_tress,
+        &view_uniforms,
+    ).unwrap();
+
     commands.insert_resource(GameOfLifeImageBindGroup(bind_group));
 }
 
