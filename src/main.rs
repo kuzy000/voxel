@@ -8,10 +8,14 @@ use bevy::{
         extract_component::{ExtractComponent, ExtractComponentPlugin},
         extract_resource::{ExtractResource, ExtractResourcePlugin},
         primitives::Frustum,
-        render_asset::{PrepareAssetError, RenderAsset, RenderAssetPlugin, RenderAssetUsages, RenderAssets},
+        render_asset::{
+            PrepareAssetError, RenderAsset, RenderAssetPlugin, RenderAssetUsages, RenderAssets,
+        },
         render_graph::{self, RenderGraph, RenderLabel},
         render_resource::{
-            binding_types::{storage_buffer, texture_storage_2d, uniform_buffer},
+            binding_types::{
+                storage_buffer, storage_buffer_read_only, texture_storage_2d, uniform_buffer,
+            },
             encase::ArrayLength,
             *,
         },
@@ -24,6 +28,8 @@ use bevy::{
 use std::borrow::Cow;
 
 const SIZE: (u32, u32, u32) = (4, 4, 4);
+const VOXEL_COUNT: usize = 4 * 4 * 4;
+const VOXEL_DIM: usize = 4;
 const SCREEN_SIZE: (u32, u32) = (1280, 720);
 const WORKGROUP_SIZE: u32 = 8;
 
@@ -197,13 +203,20 @@ fn setup(
     commands.spawn(Camera2dBundle::default());
 
     commands.spawn(GameCameraBundle {
-        transform: Transform::from_xyz(10.0, 5.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+        transform: Transform::from_xyz(-10.0, -5.0, -5.0).looking_at(Vec3::ZERO, Vec3::Y),
         ..Default::default()
     });
 
-    let data = (0..64).map(|i| (i % 2) as u32);
+    let voxel_tree = gen_voxel_tree(
+        1,
+        &|v| {
+            let v = Vec3::new(v.x as f32, v.y as f32, v.z as f32) / ((VOXEL_DIM * VOXEL_DIM - 1) as f32);
+            let v = v * 2f32 - 1f32;
 
-    let voxel_tree = VoxelTree { buffer: data.collect() };
+            v.length() <= 1.
+        }
+    );
+
     let voxel_tree = voxel_trees.add(voxel_tree);
 
     commands.insert_resource(GameOfLifeImage {
@@ -211,6 +224,92 @@ fn setup(
         view: Default::default(),
         voxel_tree: voxel_tree,
     });
+}
+
+fn pos_to_idx(ipos: IVec3) -> i32 {
+    ipos.x * 4 * 4 + ipos.y * 4 + ipos.z
+}
+
+fn gen_voxel_leaf(offset: IVec3, f: &impl Fn(IVec3) -> bool) -> Option<VoxelLeaf> {
+    let mut mask: u64 = 0;
+    for x in 0..VOXEL_DIM {
+        for y in 0..VOXEL_DIM {
+            for z in 0..VOXEL_DIM {
+                let v = IVec3 {
+                    x: x as i32,
+                    y: y as i32,
+                    z: z as i32,
+                };
+
+                if f(offset + v) {
+                    mask |= 1u64 << pos_to_idx(v);
+                }
+            }
+        }
+    }
+
+    if mask != 0 {
+        Some(VoxelLeaf {
+            mask: [mask as u32, (mask >> 32) as u32],
+            voxels: [Voxel { value: 1 }; VOXEL_COUNT],
+        })
+    } else {
+        None
+    }
+}
+
+fn gen_voxel_node(tree: &mut VoxelTree, offset: IVec3, depth: u8, max_depth: u8, f: &impl Fn(IVec3) -> bool) -> bool {
+    let idx_cur = tree.nodes.len();
+    tree.nodes.push(Default::default());
+
+    let mut mask: u64 = 0;
+    for x in 0..VOXEL_DIM {
+        for y in 0..VOXEL_DIM {
+            for z in 0..VOXEL_DIM {
+                let v = IVec3 {
+                    x: x as i32,
+                    y: y as i32,
+                    z: z as i32,
+                };
+                let index = pos_to_idx(v);
+                let offset = (offset + v) * IVec3::splat(VOXEL_DIM as i32);
+
+                if depth == max_depth - 1 {
+                    if let Some(leaf) = gen_voxel_leaf(offset, f) {
+                        tree.nodes[idx_cur].indices[index as usize] = tree.leafs.len() as u32;
+                        tree.leafs.push(leaf);
+
+                        mask |= 1u64 << index
+                    }
+                }
+                else {
+                    if gen_voxel_node(tree, offset, depth + 1, max_depth, f) {
+                        tree.nodes[idx_cur].indices[index as usize] = tree.nodes.len() as u32;
+
+                        mask |= 1u64 << index
+                    }
+                }
+            }
+        }
+    }
+
+    if mask != 0 {
+        tree.nodes[idx_cur].mask = [mask as u32, (mask >> 32) as u32];
+
+        return true;
+    } else {
+        assert_eq!(idx_cur, tree.nodes.len() - 1);
+        tree.nodes.pop();
+
+        return false;
+    }
+}
+
+fn gen_voxel_tree(depth: u8, f: &impl Fn(IVec3) -> bool) -> VoxelTree {
+    let mut res = VoxelTree::default();
+    gen_voxel_node(&mut res, IVec3::ZERO, 0, depth, f);
+
+    res
 }
 
 struct GameOfLifeComputePlugin;
@@ -267,15 +366,51 @@ struct ViewUniforms {
     uniforms: UniformBuffer<ViewUniform>,
 }
 
-#[derive(Asset, Reflect, Clone, Default, ShaderType)]
+#[derive(Reflect, Clone, Copy, Default, ShaderType, Debug)]
+struct Voxel {
+    value: u32,
+}
+
+#[derive(Reflect, Clone, ShaderType, Debug)]
+struct VoxelLeaf {
+    mask: [u32; 2],
+    voxels: [Voxel; VOXEL_COUNT],
+}
+
+impl Default for VoxelLeaf {
+    fn default() -> Self {
+        Self {
+            mask: [0; 2],
+            voxels: [Voxel { value: 0 }; VOXEL_COUNT],
+        }
+    }
+}
+
+#[derive(Reflect, Clone, ShaderType, Debug)]
+struct VoxelNode {
+    mask: [u32; 2],
+    indices: [u32; VOXEL_COUNT],
+}
+
+impl Default for VoxelNode {
+    fn default() -> Self {
+        Self {
+            mask: [0; 2],
+            indices: [0; VOXEL_COUNT],
+        }
+    }
+}
+
+#[derive(Asset, Reflect, Clone, Default, Debug)]
 struct VoxelTree {
-    #[size(runtime)]
-    buffer: Vec<u32>,
+    leafs: Vec<VoxelLeaf>,
+    nodes: Vec<VoxelNode>,
 }
 
 #[derive(Resource, Default)]
 struct GpuVoxelTree {
-    buffer: StorageBuffer<Vec<u32>>,
+    nodes: StorageBuffer<Vec<VoxelNode>>,
+    leafs: StorageBuffer<Vec<VoxelLeaf>>,
 }
 
 impl RenderAsset for VoxelTree {
@@ -291,11 +426,15 @@ impl RenderAsset for VoxelTree {
         self,
         (device, queue): &mut SystemParamItem<Self::Param>,
     ) -> Result<Self::PreparedAsset, PrepareAssetError<Self>> {
-        let mut buffer = StorageBuffer::default();
-        buffer.set(self.buffer.clone());
-        buffer.write_buffer(device, queue);
+        let mut nodes = StorageBuffer::default();
+        nodes.set(self.nodes.clone());
+        nodes.write_buffer(device, queue);
 
-        Ok(GpuVoxelTree { buffer })
+        let mut leafs = StorageBuffer::default();
+        leafs.set(self.leafs.clone());
+        leafs.write_buffer(device, queue);
+
+        Ok(GpuVoxelTree { nodes, leafs })
     }
 }
 
@@ -328,15 +467,20 @@ impl GameOfLifeImage {
             .get(self.voxel_tree.clone())
             .ok_or(AsBindGroupError::RetryNextUpdate)?;
 
-        let voxel_tree = voxel_tree
-            .buffer
+        let voxel_nodes = voxel_tree
+            .nodes
+            .binding()
+            .ok_or(AsBindGroupError::RetryNextUpdate)?;
+
+        let voxel_leafs = voxel_tree
+            .leafs
             .binding()
             .ok_or(AsBindGroupError::RetryNextUpdate)?;
 
         let res = render_device.create_bind_group(
             "voxel_tree_group",
             layout,
-            &BindGroupEntries::sequential((&texture.texture_view, view, voxel_tree)),
+            &BindGroupEntries::sequential((&texture.texture_view, view, voxel_nodes, voxel_leafs)),
         );
 
         Ok(res)
@@ -350,7 +494,8 @@ impl GameOfLifeImage {
                 (
                     texture_storage_2d(TextureFormat::Rgba8Unorm, StorageTextureAccess::ReadWrite),
                     uniform_buffer::<ViewUniform>(false),
-                    storage_buffer::<VoxelTree>(false),
+                    storage_buffer_read_only::<Vec<VoxelNode>>(false),
+                    storage_buffer_read_only::<Vec<VoxelLeaf>>(false),
                 ),
             ),
         )
@@ -419,13 +564,15 @@ fn prepare_bind_group(
     //     &pipeline.texture_bind_group_layout,
     //     &BindGroupEntries::sequential((&view.texture_view, u, &cube.texture_view)),
     // );
-    let bind_group = game_of_life_image.as_bind_group(
-        &pipeline.texture_bind_group_layout,
-        &render_device,
-        &gpu_images,
-        &gpu_voxel_tress,
-        &view_uniforms,
-    ).unwrap();
+    let bind_group = game_of_life_image
+        .as_bind_group(
+            &pipeline.texture_bind_group_layout,
+            &render_device,
+            &gpu_images,
+            &gpu_voxel_tress,
+            &view_uniforms,
+        )
+        .unwrap();
 
     commands.insert_resource(GameOfLifeImageBindGroup(bind_group));
 }
