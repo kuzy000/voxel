@@ -16,6 +16,7 @@
                 "ALLUSERSPROFILE": "C:\\ProgramData",
                 "APPDATA": "C:\\Users\\user\\AppData\\Roaming",
                 "APPLICATION_INSIGHTS_NO_DIAGNOSTIC_CHANNEL": "1",
+                "CARGO_MANIFEST_DIR": "C:\\home\\dev\\voxel_tracer",
                 "CHROME_CRASHPAD_PIPE_NAME": "\\\\.\\pipe\\crashpad_10096_RQZLVQHNHTISVMIS",
                 "COMPUTERNAME": "PC",
                 "CUDA_PATH": "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.3",

@@ -1,10 +1,12 @@
 use bevy::{
+    diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     ecs::{
         system::{lifetimeless::SRes, SystemParamItem},
         world::error,
     },
     input::mouse::*,
     prelude::*,
+    reflect::DynamicTypePath,
     render::{
         self,
         camera::CameraProjection,
@@ -28,6 +30,7 @@ use bevy::{
     },
     window::WindowPlugin,
 };
+use dot_vox::DotVoxData;
 use std::borrow::Cow;
 
 const SIZE: (u32, u32, u32) = (4, 4, 4);
@@ -92,9 +95,9 @@ fn update_game_camera(
     }
 
     let speed = if input.pressed(KeyCode::ShiftLeft) {
-        50.
+        500.
     } else {
-        15.
+        100.
     };
 
     let mut v = Vec3::ZERO;
@@ -210,16 +213,82 @@ fn setup(
         ..Default::default()
     });
 
-    const DEPTH: u8 = 4;
+    const DEPTH: u8 = 6;
 
-    let voxel_tree = gen_voxel_tree(DEPTH, &|v| {
-        //v.x >= 63
-        let v = Vec3::new(v.x as f32, v.y as f32, v.z as f32) / ((VOXEL_DIM.pow(DEPTH as u32) - 1) as f32);
-        let v = v * 2f32 - 1f32;
+    let mut voxel_tree = VoxelTree::new(DEPTH);
+    
+    // let model_path = "assets/Church_Of_St_Sophia.vox";
 
-        v.length() <= 1.
-    });
+    // let vox_model = dot_vox::load(model_path).expect("Failed to load");
+    // place_vox(&mut voxel_tree, &vox_model);
+    
+    let size = 500;
+    for x in 0..size {
+        for z in 0..size {
+            voxel_tree.set_voxel(IVec3::new(x, 0, z), Voxel { value: 1});
+        }
+    }
 
+    for x in 0..size {
+        for y in 0..size {
+            voxel_tree.set_voxel(IVec3::new(x, y, size - 20), Voxel { value: 1});
+        }
+    }
+    
+    let r = 200;
+    for x in 0..(r * 2) {
+        for y in 0..(r * 2) {
+            for z in 0..(r * 2) {
+                let v = Vec3::new(x as f32, y as f32, z as f32) - Vec3::splat(r as f32);
+                let len = v.length();
+                
+                let offset = (IVec3::splat(size) - IVec3::splat(r * 2)) / 2;
+                
+                if len > (r as f32 - 5.) && len < (r as f32 + 5.) {
+                    voxel_tree.set_voxel(IVec3::new(x, y, z) + offset, Voxel { value: 1});
+                }
+            }
+        }
+    }
+
+    // error!("materials: {:#?}", vox_model.materials);
+    // error!("palette: {:#?}", vox_model.palette);
+    // error!("models: {:#?}", vox_model.models);
+    // error!("scenes: {:#?}", vox_model.scenes);
+    //error!("layers: {:#?}", vox_model.layers);
+
+    // let voxel_tree = gen_voxel_tree(DEPTH, &|v| {
+    //     //v.x >= 63
+    //     let v = Vec3::new(v.x as f32, v.y as f32, v.z as f32) / ((VOXEL_DIM.pow(DEPTH as u32) - 1) as f32);
+    //     let v = v * 2f32 - 1f32;
+
+    //     v.length() <= 1.
+    // });
+
+    // TODO: zero bug
+    // voxel_tree.set_voxel(IVec3::new(0, 0, 0), Voxel { value: 1 });
+    // voxel_tree.set_voxel(IVec3::new(1, 1, 1), Voxel { value: 1 });
+    // voxel_tree.set_voxel(IVec3::new(2, 2, 2), Voxel { value: 1 });
+    // voxel_tree.set_voxel(IVec3::new(3, 3, 3), Voxel { value: 1 });
+
+    // TODO: cube tearing
+    // let size = (VOXEL_DIM as u32).pow(DEPTH as u32) as i32;
+    // for x in 0..size {
+    //     for y in 0..size {
+    //         for z in 0..size {
+    //             let mut place = false;
+    //             place = place || x == 3 || x == size - 4;
+    //             place = place || y == 3 || y == size - 4;
+    //             place = place || z == 3 || z == size - 4;
+    //
+    //             if place {
+    //                 voxel_tree.set_voxel(IVec3::new(x, y, z), Voxel { value: 1});
+    //             }
+    //         }
+    //     }
+    // }
+
+    // error!("voxel tree: {:#?}", voxel_tree);
     // voxel_tree.debug_print();
 
     let voxel_tree = voxel_trees.add(voxel_tree);
@@ -229,6 +298,150 @@ fn setup(
         view: Default::default(),
         voxel_tree: voxel_tree,
     });
+}
+
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct IMat4 {
+    pub x_axis: IVec4,
+    pub y_axis: IVec4,
+    pub z_axis: IVec4,
+    pub w_axis: IVec4,
+}
+
+impl IMat4 {
+    pub const ZERO: Self = Self::from_cols(IVec4::ZERO, IVec4::ZERO, IVec4::ZERO, IVec4::ZERO);
+    pub const IDENTITY: Self = Self::from_cols(IVec4::X, IVec4::Y, IVec4::Z, IVec4::W);
+
+    pub const fn from_cols(x_axis: IVec4, y_axis: IVec4, z_axis: IVec4, w_axis: IVec4) -> Self {
+        Self {
+            x_axis,
+            y_axis,
+            z_axis,
+            w_axis,
+        }
+    }
+
+    pub fn mul_vec4(&self, rhs: IVec4) -> IVec4 {
+        let mut res = self.x_axis * rhs.xxxx();
+        res = res + self.y_axis * rhs.yyyy();
+        res = res + self.z_axis * rhs.zzzz();
+        res = res + self.w_axis * rhs.wwww();
+        res
+    }
+    
+    pub fn mul_mat4(&self, rhs: &Self) -> Self {
+        Self::from_cols(
+            self.mul_vec4(rhs.x_axis),
+            self.mul_vec4(rhs.y_axis),
+            self.mul_vec4(rhs.z_axis),
+            self.mul_vec4(rhs.w_axis),
+        )
+    }
+
+    pub fn col_mut(&mut self, index: usize) -> &mut IVec4 {
+        match index {
+            0 => &mut self.x_axis,
+            1 => &mut self.y_axis,
+            2 => &mut self.z_axis,
+            3 => &mut self.w_axis,
+            _ => panic!("index out of bounds"),
+        }
+    }
+
+    pub fn from_translation(translation: IVec3) -> Self {
+        Self::from_cols(
+            IVec4::X,
+            IVec4::Y,
+            IVec4::Z,
+            IVec4::new(translation.x, translation.y, translation.z, 1),
+        )
+    }
+}
+
+
+pub fn rot_to_mat(rot: u8) -> IMat4 {
+    let mut res = IMat4::ZERO;
+
+    let index_nz1 = rot & 0b11;
+    let index_nz2 = (rot >> 2) & 0b11;
+    let index_nz3 = 3 - index_nz1 - index_nz2;
+
+    let row_1_sign: i32 = if rot & (1 << 4) == 0 { 1 } else { -1 };
+    let row_2_sign: i32 = if rot & (1 << 5) == 0 { 1 } else { -1 };
+    let row_3_sign: i32 = if rot & (1 << 6) == 0 { 1 } else { -1 };
+
+    res.col_mut(index_nz1 as usize)[0] = row_1_sign;
+    res.col_mut(index_nz2 as usize)[1] = row_2_sign;
+    res.col_mut(index_nz3 as usize)[2] = row_3_sign;
+    res.col_mut(3)[3] = 1;
+
+    res
+}
+
+
+fn place_vox_model(tree: &mut VoxelTree, vox: &DotVoxData, model_id: u32, tr: &IMat4) {
+    let model = &vox.models[model_id as usize];
+    for &dot_vox::Voxel { x, y, z, i } in &model.voxels {
+        let pos = tr.mul_vec4(IVec4::new(x as i32, y as i32, z as i32, 1));
+        
+        assert_eq!(pos.w, 1);
+        
+        let color = vox.palette[i as usize];
+        // if color.a != 255 {
+        //     continue;
+        // }
+
+        tree.set_voxel(pos.xyz(), Voxel { value: 1 });
+    }
+}
+
+fn place_vox_scene_node(tree: &mut VoxelTree, vox: &DotVoxData, node_idx: u32, tr: &IMat4) {
+    let node = &vox.scenes[node_idx as usize];
+    match &node {
+        dot_vox::SceneNode::Transform { attributes: _, frames, child, layer_id: _ } => {
+            let attr = &frames[0].attributes;
+
+            let t = attr.get("_t").map_or(IVec3::ZERO, |s| {
+                let v: Vec<&str> = s.split(' ').collect();
+                let x = v[0].parse().unwrap();
+                let y = v[1].parse().unwrap();
+                let z = v[2].parse().unwrap();
+                IVec3::new(x, y, z)
+            });
+
+            let r =  attr.get("_r").map_or(0b100, |s| s.parse().unwrap());
+            
+            let trn = IMat4::from_translation(t).mul_mat4(&rot_to_mat(r));
+
+            place_vox_scene_node(tree, vox, *child, &tr.mul_mat4(&trn))
+        }
+        dot_vox::SceneNode::Group { attributes: _, children } => {
+            for child in children {
+                place_vox_scene_node(tree, vox, *child, tr)
+            }
+        } 
+        dot_vox::SceneNode::Shape { attributes: _, models } => {
+            for dot_vox::ShapeModel { model_id, attributes: _ }  in models {
+                place_vox_model(tree, vox, *model_id, tr);
+            }
+        }
+    }
+}
+
+fn place_vox(tree: &mut VoxelTree, vox: &DotVoxData) {
+    let t = IMat4::from_translation(IVec3::new(2000, 50, 2000));
+    let r = IMat4::from_cols(
+        IVec4::new(1, 0, 0, 0),
+        IVec4::new(0, 0, 1, 0),
+        IVec4::new(0, 1, 0, 0),
+        IVec4::new(0, 0, 0, 1),
+    );
+    
+    let tr = t.mul_mat4(&r);
+
+    place_vox_scene_node(tree, vox, 0, &tr);
 }
 
 fn pos_to_idx(ipos: IVec3) -> i32 {
@@ -334,6 +547,8 @@ impl Plugin for GameOfLifeComputePlugin {
         app.add_plugins(ExtractResourcePlugin::<GameOfLifeImage>::default());
         app.add_plugins(RenderAssetPlugin::<VoxelTree>::default());
         app.add_plugins(ExtractComponentPlugin::<GameCamera>::default());
+        // app.add_plugins(FrameTimeDiagnosticsPlugin::default());
+        // app.add_plugins(LogDiagnosticsPlugin::default());
         app.init_asset::<VoxelTree>();
         let render_app = app.sub_app_mut(RenderApp);
 
@@ -407,7 +622,12 @@ impl VoxelNode {
         let mask: u64 = ((self.mask[1] as u64) << 32) | (self.mask[0] as u64);
 
         error!("{:indent$}Node: {}", "", self_idx, indent = depth * 2);
-        error!("{:indent$}Indices: {:?}", "", self.indices, indent = (depth + 1) * 2);
+        error!(
+            "{:indent$}Indices: {:?}",
+            "",
+            self.indices,
+            indent = (depth + 1) * 2
+        );
         if depth == 1 {
             return;
         }
@@ -417,7 +637,7 @@ impl VoxelNode {
                 continue;
             }
             error!("{:indent$}Idx: {}", "", i, indent = (depth + 1) * 2);
-            
+
             let nidx = self.indices[i as usize] as usize;
 
             tree.nodes[nidx].debug_print(nidx, depth + 1, tree);
@@ -436,15 +656,122 @@ impl Default for VoxelNode {
 
 #[derive(Asset, Reflect, Clone, Default, Debug)]
 struct VoxelTree {
+    depth: u8,
     leafs: Vec<VoxelLeaf>,
     nodes: Vec<VoxelNode>,
 }
 
+fn set_mask(mask: &mut [u32; 2], idx: u32) {
+    let mut mask64: u64 = ((mask[1] as u64) << 32) | (mask[0] as u64);
+    mask64 |= 1u64 << idx;
+
+    mask[0] = mask64 as u32;
+    mask[1] = (mask64 >> 32) as u32;
+}
+
 impl VoxelTree {
+    fn new(depth: u8) -> Self {
+        let root = VoxelNode {
+            mask: [0u32, 0u32],
+            indices: [0u32; VOXEL_COUNT],
+        };
+
+        Self {
+            depth,
+            leafs: Vec::new(),
+            nodes: vec![root],
+        }
+    }
+
     fn debug_print(&self) {
         error!("Num of nodes: {}", self.nodes.len());
 
         self.nodes[0].debug_print(0, 0, self);
+    }
+
+    fn set_or_create_node(&mut self, parent_idx: u32, pos: IVec3) -> u32 {
+        let nodes_len = self.nodes.len();
+        let parent = &mut self.nodes[parent_idx as usize];
+        let idx = pos_to_idx(pos);
+        let mask: u64 = ((parent.mask[1] as u64) << 32) | (parent.mask[0] as u64);
+
+        if mask & (1u64 << idx) != 0 {
+            parent.indices[idx as usize]
+        } else {
+            let res = nodes_len as u32;
+            parent.indices[idx as usize] = res;
+            set_mask(&mut parent.mask, idx as u32);
+
+            self.nodes.push(VoxelNode {
+                mask: [0, 0],
+                indices: [0; VOXEL_COUNT],
+            });
+
+            res
+        }
+    }
+
+    fn set_or_create_leaf(&mut self, parent_idx: u32, pos: IVec3) -> u32 {
+        assert!(pos.x >= 0);
+        assert!(pos.y >= 0);
+        assert!(pos.z >= 0);
+
+        let parent = &mut self.nodes[parent_idx as usize];
+        let idx = pos_to_idx(pos);
+        let mask: u64 = ((parent.mask[1] as u64) << 32) | (parent.mask[0] as u64);
+
+        if mask & (1u64 << idx) != 0 {
+            parent.indices[idx as usize]
+        } else {
+            let res = self.leafs.len() as u32;
+            parent.indices[idx as usize] = res;
+            set_mask(&mut parent.mask, idx as u32);
+
+            self.leafs.push(VoxelLeaf {
+                mask: [0, 0],
+                voxels: [Voxel { value: 0 }; VOXEL_COUNT],
+            });
+
+            res
+        }
+    }
+
+    fn set_voxel(&mut self, pos: IVec3, voxel: Voxel) {
+        assert_ne!(self.depth, 0);
+        
+        let max = (VOXEL_DIM as i32).pow(self.depth as u32);
+
+        if pos.x < 0 || pos.x >= max {
+            return;
+        }
+
+        if pos.y < 0 || pos.y >= max {
+            return;
+        }
+
+        if pos.z < 0 || pos.z >= max {
+            return;
+        }
+
+        // TODO: assert pos vs tree size
+
+        let mut parent_idx = 0;
+
+        for depth in (1..self.depth).rev() {
+            let local_pos = pos / (VOXEL_DIM as i32).pow(depth as u32) % (VOXEL_DIM as i32);
+
+            if depth == 1 {
+                let idx = self.set_or_create_leaf(parent_idx, local_pos);
+
+                let leaf = &mut self.leafs[idx as usize];
+                let local_pos = pos % (VOXEL_DIM as i32);
+                let idx = pos_to_idx(local_pos);
+                set_mask(&mut leaf.mask, idx as u32);
+                leaf.voxels[idx as usize] = voxel;
+            } else {
+                parent_idx = self.set_or_create_node(parent_idx, local_pos);
+            }
+        }
     }
 }
 

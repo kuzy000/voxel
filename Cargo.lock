@@ -1566,6 +1566,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "dot_vox"
+version = "5.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd05cab02d6074145c6f92ddf1b57357e4bc1424f87c790c044de62bdc94c13a"
+dependencies = [
+ "ahash",
+ "lazy_static",
+ "log",
+ "nom",
+]
+
+[[package]]
 name = "downcast-rs"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3470,6 +3482,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "color-backtrace",
+ "dot_vox",
 ]
 
 [[package]]

@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 bevy = { version = "0.13.2", features = ["file_watcher"] }
 color-backtrace = "0.6.1"
+dot_vox = "5.1.1"

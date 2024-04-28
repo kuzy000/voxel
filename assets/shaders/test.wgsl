@@ -13,7 +13,7 @@ struct View {
 const VOXEL_SIZE: f32 = 1.0f;
 const VOXEL_DIM: i32 = 4;
 const VOXEL_COUNT: i32 = VOXEL_DIM * VOXEL_DIM * VOXEL_DIM;
-const VOXEL_TREE_DEPTH: i32 = 4;
+const VOXEL_TREE_DEPTH: i32 = 6;
 
 struct Voxel {
     value: u32,
