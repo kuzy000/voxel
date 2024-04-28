@@ -213,7 +213,7 @@ fn setup(
         ..Default::default()
     });
 
-    const DEPTH: u8 = 6;
+    const DEPTH: u8 = 4;
 
     let mut voxel_tree = VoxelTree::new(DEPTH);
     
@@ -222,7 +222,7 @@ fn setup(
     // let vox_model = dot_vox::load(model_path).expect("Failed to load");
     // place_vox(&mut voxel_tree, &vox_model);
     
-    let size = 500;
+    let size = 200;
     for x in 0..size {
         for z in 0..size {
             voxel_tree.set_voxel(IVec3::new(x, 0, z), Voxel { value: 1});
@@ -235,7 +235,7 @@ fn setup(
         }
     }
     
-    let r = 200;
+    let r = 80;
     for x in 0..(r * 2) {
         for y in 0..(r * 2) {
             for z in 0..(r * 2) {
