@@ -13,10 +13,10 @@ struct View {
 const VOXEL_SIZE: f32 = 1.0f;
 const VOXEL_DIM: i32 = 4;
 const VOXEL_COUNT: i32 = VOXEL_DIM * VOXEL_DIM * VOXEL_DIM;
-const VOXEL_TREE_DEPTH: i32 = 4;
+const VOXEL_TREE_DEPTH: i32 = 6;
 
 struct Voxel {
-    value: u32,
+    color: vec3f,
 }
 
 struct VoxelLeaf {
@@ -361,12 +361,12 @@ fn ray_bbox(org: vec3f, dir: vec3f, lb: vec3f, rt: vec3f) -> Intersection {
     dirfrac.z = 1.0f / dir.z;
     // lb is the corner of AABB with minimal coordinates - left bottom, rt is maximal corner
     // r.org is origin of ray
-    let t1 = (lb.x - org.x)*dirfrac.x;
-    let t2 = (rt.x - org.x)*dirfrac.x;
-    let t3 = (lb.y - org.y)*dirfrac.y;
-    let t4 = (rt.y - org.y)*dirfrac.y;
-    let t5 = (lb.z - org.z)*dirfrac.z;
-    let t6 = (rt.z - org.z)*dirfrac.z;
+    let t1 = (lb.x - org.x) * dirfrac.x;
+    let t2 = (rt.x - org.x) * dirfrac.x;
+    let t3 = (lb.y - org.y) * dirfrac.y;
+    let t4 = (rt.y - org.y) * dirfrac.y;
+    let t5 = (lb.z - org.z) * dirfrac.z;
+    let t6 = (rt.z - org.z) * dirfrac.z;
 
     let tmin = max(max(min(t1, t2), min(t3, t4)), min(t5, t6));
     let tmax = min(min(max(t1, t2), max(t3, t4)), max(t5, t6));
@@ -877,7 +877,7 @@ fn ray_march_voxel(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
     
     // Pos at which the ray enters the voxel tree
     // Add small bias so the in_pos0 is always inside the box
-    let in_pos0 = pos + dir * (inter_t + BIAS);
+    let in_pos0 = pos + dir * inter_t;
     var depth = 0;
 
     // TODO remove it it. It should already be inside the box
@@ -887,7 +887,7 @@ fn ray_march_voxel(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
     frames[depth].local_pos = global_pos / get_voxel_size(1u);
 
     frames[depth].index = 0u;
-    frames[depth].ipos = vec3<i32>(floor(frames[depth].local_pos));
+    frames[depth].ipos = clamp(vec3<i32>(floor(frames[depth].local_pos)), vec3i(0), vec3i(VOXEL_DIM - 1));
     let istep = vec3<i32>(sign(dir));
     
     // let delta = abs(vec3(length(dir)) / dir);
@@ -920,6 +920,8 @@ fn ray_march_voxel(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
         return RayMarchResult(vec3<f32>(), side_point, 0.f);
         // return RayMarchResult(vec3<f32>(), vec3<f32>(mask), 0.f);
     }
+    
+    var dst = 0.;
 
     for (var i = 0; i < MAX_STEPS; i++) {
         let ipos = frames[depth].ipos;
@@ -944,8 +946,10 @@ fn ray_march_voxel(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
 
             let color = vec3f(local_pos);
             if (get_voxel_leaf(index, ipos)) {
+                let voxel = voxel_leafs[index].voxels[pos_to_idx(ipos)];
+
                 let normal = -normalize(vec3<f32>(mask) * vec3<f32>(istep));
-                let color = normal * .5 + .5;
+                let color = voxel.color; //normal * .5 + .5;
                 // let color = vec3f(ipos) / 4.f;
                 
                 var distance = 0.f;
@@ -1192,7 +1196,7 @@ fn ray_march_voxel(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
         
         let tmax = frames[depth].tmax;
         mask = tmax.xyz <= min(tmax.yzx, tmax.zxy);
-        
+
         frames[depth].tmax_prev = frames[depth].tmax;
         frames[depth].tmax += vec3<f32>(mask) * delta;
         frames[depth].ipos += vec3<i32>(mask) * istep;

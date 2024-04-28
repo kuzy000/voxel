@@ -213,43 +213,45 @@ fn setup(
         ..Default::default()
     });
 
-    const DEPTH: u8 = 4;
+    const DEPTH: u8 = 6;
 
     let mut voxel_tree = VoxelTree::new(DEPTH);
     
-    // let model_path = "assets/Church_Of_St_Sophia.vox";
+    let model_path = "assets/Church_Of_St_Sophia.vox";
+    // let model_path = "assets/untitled.vox";
 
-    // let vox_model = dot_vox::load(model_path).expect("Failed to load");
-    // place_vox(&mut voxel_tree, &vox_model);
+    let vox_model = dot_vox::load(model_path).expect("Failed to load");
+    place_vox(&mut voxel_tree, &vox_model);
     
-    let size = 200;
-    for x in 0..size {
-        for z in 0..size {
-            voxel_tree.set_voxel(IVec3::new(x, 0, z), Voxel { value: 1});
-        }
-    }
+    // TEST scene with sphere
+    // let size = 200;
+    // for x in 0..size {
+    //     for z in 0..size {
+    //         voxel_tree.set_voxel(IVec3::new(x, 0, z), Voxel { value: 1});
+    //     }
+    // }
 
-    for x in 0..size {
-        for y in 0..size {
-            voxel_tree.set_voxel(IVec3::new(x, y, size - 20), Voxel { value: 1});
-        }
-    }
-    
-    let r = 80;
-    for x in 0..(r * 2) {
-        for y in 0..(r * 2) {
-            for z in 0..(r * 2) {
-                let v = Vec3::new(x as f32, y as f32, z as f32) - Vec3::splat(r as f32);
-                let len = v.length();
-                
-                let offset = (IVec3::splat(size) - IVec3::splat(r * 2)) / 2;
-                
-                if len > (r as f32 - 5.) && len < (r as f32 + 5.) {
-                    voxel_tree.set_voxel(IVec3::new(x, y, z) + offset, Voxel { value: 1});
-                }
-            }
-        }
-    }
+    // for x in 0..size {
+    //     for y in 0..size {
+    //         voxel_tree.set_voxel(IVec3::new(x, y, size - 20), Voxel { value: 1});
+    //     }
+    // }
+    // 
+    // let r = 50;
+    // for x in 0..(r * 2) {
+    //     for y in 0..(r * 2) {
+    //         for z in 0..(r * 2) {
+    //             let v = Vec3::new(x as f32, y as f32, z as f32) - Vec3::splat(r as f32);
+    //             let len = v.length();
+    //             
+    //             let offset = (IVec3::splat(size) - IVec3::splat(r * 2)) / 2;
+    //             
+    //             if len > (r as f32 - 5.) && len < (r as f32 + 5.) {
+    //                 voxel_tree.set_voxel(IVec3::new(x, y, z) + offset, Voxel { value: 1});
+    //             }
+    //         }
+    //     }
+    // }
 
     // error!("materials: {:#?}", vox_model.materials);
     // error!("palette: {:#?}", vox_model.palette);
@@ -383,8 +385,23 @@ pub fn rot_to_mat(rot: u8) -> IMat4 {
 
 fn place_vox_model(tree: &mut VoxelTree, vox: &DotVoxData, model_id: u32, tr: &IMat4) {
     let model = &vox.models[model_id as usize];
+    
+    let mut translate = -IVec3::new(model.size.x as i32, model.size.y as i32, model.size.z as i32) / 2;
+   //  let translate_inv = -translate;
+    
+    let rotated = IVec4::new(1, 1, 1, 0);
+    let rotated = tr.mul_vec4(rotated);
+    let rotated = IVec4::splat(0).max(rotated);
+
+    // info!("{:#?}", model.size);
+
+    // let trs = IMat4::from_translation(translate_inv).mul_mat4(&tr.mul_mat4(&IMat4::from_translation(translate)));
+    let trs = &tr.mul_mat4(&IMat4::from_translation(translate));
+
     for &dot_vox::Voxel { x, y, z, i } in &model.voxels {
-        let pos = tr.mul_vec4(IVec4::new(x as i32, y as i32, z as i32, 1));
+        let mut pos = trs.mul_vec4(IVec4::new(x as i32, y as i32, z as i32, 1));
+        pos += rotated;
+        // error!("{} {} {} -> {} {} {}", x, y, z, pos.x, pos.y, pos.z);
         
         assert_eq!(pos.w, 1);
         
@@ -392,8 +409,9 @@ fn place_vox_model(tree: &mut VoxelTree, vox: &DotVoxData, model_id: u32, tr: &I
         // if color.a != 255 {
         //     continue;
         // }
+        let color = Vec3::new(color.r as f32 / 255., color.g as f32 / 255., color.b as f32 / 255.);
 
-        tree.set_voxel(pos.xyz(), Voxel { value: 1 });
+        tree.set_voxel(pos.xyz(), Voxel { color });
     }
 }
 
@@ -410,6 +428,8 @@ fn place_vox_scene_node(tree: &mut VoxelTree, vox: &DotVoxData, node_idx: u32, t
                 let z = v[2].parse().unwrap();
                 IVec3::new(x, y, z)
             });
+        
+            // let t = IVec3::ZERO;
 
             let r =  attr.get("_r").map_or(0b100, |s| s.parse().unwrap());
             
@@ -469,7 +489,7 @@ fn gen_voxel_leaf(offset: IVec3, f: &impl Fn(IVec3) -> bool) -> Option<VoxelLeaf
     if mask != 0 {
         Some(VoxelLeaf {
             mask: [mask as u32, (mask >> 32) as u32],
-            voxels: [Voxel { value: 1 }; VOXEL_COUNT],
+            voxels: [Voxel { color: Vec3::splat(1.) }; VOXEL_COUNT],
         })
     } else {
         None
@@ -593,7 +613,7 @@ struct ViewUniforms {
 
 #[derive(Reflect, Clone, Copy, Default, ShaderType, Debug)]
 struct Voxel {
-    value: u32,
+    color: Vec3,
 }
 
 #[derive(Reflect, Clone, ShaderType, Debug)]
@@ -606,7 +626,7 @@ impl Default for VoxelLeaf {
     fn default() -> Self {
         Self {
             mask: [0; 2],
-            voxels: [Voxel { value: 0 }; VOXEL_COUNT],
+            voxels: [Voxel { color: Vec3::ONE }; VOXEL_COUNT],
         }
     }
 }
@@ -729,7 +749,7 @@ impl VoxelTree {
 
             self.leafs.push(VoxelLeaf {
                 mask: [0, 0],
-                voxels: [Voxel { value: 0 }; VOXEL_COUNT],
+                voxels: [Voxel { color: Vec3::ONE }; VOXEL_COUNT],
             });
 
             res
