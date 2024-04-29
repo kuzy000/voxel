@@ -35,6 +35,7 @@ pub struct VoxelNode {
 }
 
 impl VoxelNode {
+    #[allow(dead_code)]
     pub fn debug_print(&self, self_idx: usize, depth: usize, tree: &VoxelTree) {
         let mask: u64 = ((self.mask[1] as u64) << 32) | (self.mask[0] as u64);
 
@@ -92,6 +93,7 @@ impl VoxelTree {
         }
     }
 
+    #[allow(dead_code)]
     pub fn debug_print(&self) {
         error!("Num of nodes: {}", self.nodes.len());
 
