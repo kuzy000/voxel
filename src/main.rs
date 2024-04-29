@@ -46,7 +46,7 @@ fn main() {
                 }),
                 ..default()
             }),
-            GameOfLifeComputePlugin,
+            VoxelTracerPlugin,
         ))
         .add_systems(Startup, setup)
         //.add_systems(Update, update_camera)
@@ -103,22 +103,22 @@ fn setup(
 
     let voxel_tree = voxel_trees.add(voxel_tree);
 
-    commands.insert_resource(GameOfLifeImage {
+    commands.insert_resource(VoxelTracer {
         texture: image,
         voxel_tree: voxel_tree,
     });
 }
 
-struct GameOfLifeComputePlugin;
+struct VoxelTracerPlugin;
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
-struct GameOfLifeLabel;
+struct VoxelTracerLabel;
 
-impl Plugin for GameOfLifeComputePlugin {
+impl Plugin for VoxelTracerPlugin {
     fn build(&self, app: &mut App) {
         // Extract the game of life image resource from the main world into the render world
         // for operation on by the compute shader and display on the sprite.
-        app.add_plugins(ExtractResourcePlugin::<GameOfLifeImage>::default());
+        app.add_plugins(ExtractResourcePlugin::<VoxelTracer>::default());
         app.add_plugins(RenderAssetPlugin::<VoxelTree>::default());
         app.add_plugins(ExtractComponentPlugin::<GameCamera>::default());
         // app.add_plugins(FrameTimeDiagnosticsPlugin::default());
@@ -136,13 +136,13 @@ impl Plugin for GameOfLifeComputePlugin {
         render_app.add_systems(ExtractSchedule, extract_view);
 
         let mut render_graph = render_app.world.resource_mut::<RenderGraph>();
-        render_graph.add_node(GameOfLifeLabel, GameOfLifeNode::default());
-        render_graph.add_node_edge(GameOfLifeLabel, bevy::render::graph::CameraDriverLabel);
+        render_graph.add_node(VoxelTracerLabel, VoxelTracerRenderNode::default());
+        render_graph.add_node_edge(VoxelTracerLabel, bevy::render::graph::CameraDriverLabel);
     }
 
     fn finish(&self, app: &mut App) {
         let render_app = app.sub_app_mut(RenderApp);
-        render_app.init_resource::<GameOfLifePipeline>();
+        render_app.init_resource::<VoxelTracerPipeline>();
         render_app.init_resource::<ViewUniforms>();
     }
 }
@@ -196,13 +196,14 @@ impl RenderAsset for VoxelTree {
     }
 }
 
+// TODO: rename me
 #[derive(Resource, Clone, ExtractResource)]
-struct GameOfLifeImage {
+struct VoxelTracer {
     texture: Handle<Image>,
     voxel_tree: Handle<VoxelTree>,
 }
 
-impl GameOfLifeImage {
+impl VoxelTracer {
     fn as_bind_group(
         &self,
         layout: &BindGroupLayout,
@@ -260,7 +261,7 @@ impl GameOfLifeImage {
 }
 
 #[derive(Resource)]
-struct GameOfLifeImageBindGroup(BindGroup);
+struct VoxelTracerBindGroup(BindGroup);
 
 fn extract_view(
     mut commands: Commands,
@@ -305,46 +306,37 @@ fn prepare_view(
 
 fn prepare_bind_group(
     mut commands: Commands,
-    pipeline: Res<GameOfLifePipeline>,
+    pipeline: Res<VoxelTracerPipeline>,
     gpu_images: Res<RenderAssets<Image>>,
-    gpu_voxel_tress: Res<RenderAssets<VoxelTree>>,
-    game_of_life_image: Res<GameOfLifeImage>,
+    gpu_voxel_trees: Res<RenderAssets<VoxelTree>>,
+    voxel_tracer: Res<VoxelTracer>,
     view_uniforms: Res<ViewUniforms>,
     render_device: Res<RenderDevice>,
 ) {
-    // let view = gpu_images.get(&game_of_life_image.texture).unwrap();
-    // let u = view_uniforms.uniforms.binding().unwrap();
-    // let voxel_tree = gpu_voxel_tress.get(&game_of_life_image.cube).unwrap();
-
-    // let bind_group =  render_device.create_bind_group(
-    //     None,
-    //     &pipeline.texture_bind_group_layout,
-    //     &BindGroupEntries::sequential((&view.texture_view, u, &cube.texture_view)),
-    // );
-    let bind_group = game_of_life_image
+    let bind_group = voxel_tracer
         .as_bind_group(
             &pipeline.texture_bind_group_layout,
             &render_device,
             &gpu_images,
-            &gpu_voxel_tress,
+            &gpu_voxel_trees,
             &view_uniforms,
         )
         .unwrap();
 
-    commands.insert_resource(GameOfLifeImageBindGroup(bind_group));
+    commands.insert_resource(VoxelTracerBindGroup(bind_group));
 }
 
 #[derive(Resource)]
-struct GameOfLifePipeline {
+struct VoxelTracerPipeline {
     texture_bind_group_layout: BindGroupLayout,
     init_pipeline: CachedComputePipelineId,
     update_pipeline: CachedComputePipelineId,
 }
 
-impl FromWorld for GameOfLifePipeline {
+impl FromWorld for VoxelTracerPipeline {
     fn from_world(world: &mut World) -> Self {
         let render_device = world.resource::<RenderDevice>();
-        let texture_bind_group_layout = GameOfLifeImage::bind_group_layout(render_device);
+        let texture_bind_group_layout = VoxelTracer::bind_group_layout(render_device);
         let shader = world.resource::<AssetServer>().load("shaders/test.wgsl");
         let pipeline_cache = world.resource::<PipelineCache>();
         let init_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
@@ -364,7 +356,7 @@ impl FromWorld for GameOfLifePipeline {
             entry_point: Cow::from("update"),
         });
 
-        GameOfLifePipeline {
+        VoxelTracerPipeline {
             texture_bind_group_layout,
             init_pipeline,
             update_pipeline,
@@ -373,51 +365,51 @@ impl FromWorld for GameOfLifePipeline {
 }
 
 #[derive(Debug)]
-enum GameOfLifeState {
+enum VoxelTracerState {
     Loading,
     Init,
     Update,
 }
 
-struct GameOfLifeNode {
-    state: GameOfLifeState,
+struct VoxelTracerRenderNode {
+    state: VoxelTracerState,
 }
 
-impl Default for GameOfLifeNode {
+impl Default for VoxelTracerRenderNode {
     fn default() -> Self {
         Self {
-            state: GameOfLifeState::Loading,
+            state: VoxelTracerState::Loading,
         }
     }
 }
 
-impl render_graph::Node for GameOfLifeNode {
+impl render_graph::Node for VoxelTracerRenderNode {
     fn update(&mut self, world: &mut World) {
-        let pipeline = world.resource::<GameOfLifePipeline>();
+        let pipeline = world.resource::<VoxelTracerPipeline>();
         let pipeline_cache = world.resource::<PipelineCache>();
 
         // if the corresponding pipeline has loaded, transition to the next stage
         match self.state {
-            GameOfLifeState::Loading => {
+            VoxelTracerState::Loading => {
                 if let CachedPipelineState::Ok(_) =
                     pipeline_cache.get_compute_pipeline_state(pipeline.init_pipeline)
                 {
-                    self.state = GameOfLifeState::Init;
+                    self.state = VoxelTracerState::Init;
                 }
             }
-            GameOfLifeState::Init => {
+            VoxelTracerState::Init => {
                 if let CachedPipelineState::Ok(_) =
                     pipeline_cache.get_compute_pipeline_state(pipeline.update_pipeline)
                 {
-                    self.state = GameOfLifeState::Update;
+                    self.state = VoxelTracerState::Update;
                 }
             }
-            GameOfLifeState::Update => {
+            VoxelTracerState::Update => {
                 if pipeline_cache
                     .get_compute_pipeline(pipeline.update_pipeline)
                     .is_none()
                 {
-                    self.state = GameOfLifeState::Loading;
+                    self.state = VoxelTracerState::Loading;
                 }
             }
         }
@@ -429,9 +421,9 @@ impl render_graph::Node for GameOfLifeNode {
         render_context: &mut RenderContext,
         world: &World,
     ) -> Result<(), render_graph::NodeRunError> {
-        let texture_bind_group = &world.resource::<GameOfLifeImageBindGroup>().0;
+        let texture_bind_group = &world.resource::<VoxelTracerBindGroup>().0;
         let pipeline_cache = world.resource::<PipelineCache>();
-        let pipeline = world.resource::<GameOfLifePipeline>();
+        let pipeline = world.resource::<VoxelTracerPipeline>();
 
         let mut pass = render_context
             .command_encoder()
@@ -441,8 +433,8 @@ impl render_graph::Node for GameOfLifeNode {
 
         // select the pipeline based on the current state
         match self.state {
-            GameOfLifeState::Loading => {}
-            GameOfLifeState::Init => {
+            VoxelTracerState::Loading => {}
+            VoxelTracerState::Init => {
                 let init_pipeline = pipeline_cache
                     .get_compute_pipeline(pipeline.init_pipeline)
                     .unwrap();
@@ -453,7 +445,7 @@ impl render_graph::Node for GameOfLifeNode {
                     (SIZE.2 / WORKGROUP_SIZE).max(1),
                 );
             }
-            GameOfLifeState::Update => {
+            VoxelTracerState::Update => {
                 let update_pipeline = pipeline_cache
                     .get_compute_pipeline(pipeline.update_pipeline)
                     .unwrap();
