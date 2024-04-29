@@ -31,7 +31,10 @@ use bevy::{
     window::WindowPlugin,
 };
 use dot_vox::DotVoxData;
+use math::IMat4;
 use std::borrow::Cow;
+
+mod math;
 
 const SIZE: (u32, u32, u32) = (4, 4, 4);
 const VOXEL_COUNT: usize = 4 * 4 * 4;
@@ -302,67 +305,6 @@ fn setup(
     });
 }
 
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct IMat4 {
-    pub x_axis: IVec4,
-    pub y_axis: IVec4,
-    pub z_axis: IVec4,
-    pub w_axis: IVec4,
-}
-
-impl IMat4 {
-    pub const ZERO: Self = Self::from_cols(IVec4::ZERO, IVec4::ZERO, IVec4::ZERO, IVec4::ZERO);
-    pub const IDENTITY: Self = Self::from_cols(IVec4::X, IVec4::Y, IVec4::Z, IVec4::W);
-
-    pub const fn from_cols(x_axis: IVec4, y_axis: IVec4, z_axis: IVec4, w_axis: IVec4) -> Self {
-        Self {
-            x_axis,
-            y_axis,
-            z_axis,
-            w_axis,
-        }
-    }
-
-    pub fn mul_vec4(&self, rhs: IVec4) -> IVec4 {
-        let mut res = self.x_axis * rhs.xxxx();
-        res = res + self.y_axis * rhs.yyyy();
-        res = res + self.z_axis * rhs.zzzz();
-        res = res + self.w_axis * rhs.wwww();
-        res
-    }
-    
-    pub fn mul_mat4(&self, rhs: &Self) -> Self {
-        Self::from_cols(
-            self.mul_vec4(rhs.x_axis),
-            self.mul_vec4(rhs.y_axis),
-            self.mul_vec4(rhs.z_axis),
-            self.mul_vec4(rhs.w_axis),
-        )
-    }
-
-    pub fn col_mut(&mut self, index: usize) -> &mut IVec4 {
-        match index {
-            0 => &mut self.x_axis,
-            1 => &mut self.y_axis,
-            2 => &mut self.z_axis,
-            3 => &mut self.w_axis,
-            _ => panic!("index out of bounds"),
-        }
-    }
-
-    pub fn from_translation(translation: IVec3) -> Self {
-        Self::from_cols(
-            IVec4::X,
-            IVec4::Y,
-            IVec4::Z,
-            IVec4::new(translation.x, translation.y, translation.z, 1),
-        )
-    }
-}
-
-
 pub fn rot_to_mat(rot: u8) -> IMat4 {
     let mut res = IMat4::ZERO;
 
@@ -396,10 +338,10 @@ fn place_vox_model(tree: &mut VoxelTree, vox: &DotVoxData, model_id: u32, tr: &I
     // info!("{:#?}", model.size);
 
     // let trs = IMat4::from_translation(translate_inv).mul_mat4(&tr.mul_mat4(&IMat4::from_translation(translate)));
-    let trs = &tr.mul_mat4(&IMat4::from_translation(translate));
+    let trs = *tr * IMat4::from_translation(translate);
 
     for &dot_vox::Voxel { x, y, z, i } in &model.voxels {
-        let mut pos = trs.mul_vec4(IVec4::new(x as i32, y as i32, z as i32, 1));
+        let mut pos = trs * IVec4::new(x as i32, y as i32, z as i32, 1);
         pos += rotated;
         // error!("{} {} {} -> {} {} {}", x, y, z, pos.x, pos.y, pos.z);
         
@@ -428,14 +370,12 @@ fn place_vox_scene_node(tree: &mut VoxelTree, vox: &DotVoxData, node_idx: u32, t
                 let z = v[2].parse().unwrap();
                 IVec3::new(x, y, z)
             });
-        
-            // let t = IVec3::ZERO;
 
             let r =  attr.get("_r").map_or(0b100, |s| s.parse().unwrap());
             
-            let trn = IMat4::from_translation(t).mul_mat4(&rot_to_mat(r));
+            let trn = IMat4::from_translation(t) * rot_to_mat(r);
 
-            place_vox_scene_node(tree, vox, *child, &tr.mul_mat4(&trn))
+            place_vox_scene_node(tree, vox, *child, &(*tr * trn))
         }
         dot_vox::SceneNode::Group { attributes: _, children } => {
             for child in children {
@@ -459,7 +399,7 @@ fn place_vox(tree: &mut VoxelTree, vox: &DotVoxData) {
         IVec4::new(0, 0, 0, 1),
     );
     
-    let tr = t.mul_mat4(&r);
+    let tr = t * r;
 
     place_vox_scene_node(tree, vox, 0, &tr);
 }
