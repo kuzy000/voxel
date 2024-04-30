@@ -1,46 +1,23 @@
-use bevy::{input::mouse::MouseMotion, prelude::*, render::{extract_component::ExtractComponent, primitives::Frustum}};
+#[allow(unused)]
 
-#[derive(Component, Clone, ExtractComponent)]
+use bevy::{input::mouse::MouseMotion, prelude::*};
+
+#[derive(Component)]
 pub struct GameCamera;
-
-#[derive(Bundle)]
-pub struct GameCameraBundle {
-    pub marker: GameCamera,
-    pub projection: Projection,
-    pub frustum: Frustum,
-    pub transform: Transform,
-    pub global_transform: GlobalTransform,
-}
-
-impl Default for GameCameraBundle {
-    fn default() -> Self {
-        Self {
-            marker: GameCamera,
-            projection: Default::default(),
-            frustum: Default::default(),
-            transform: Default::default(),
-            global_transform: Default::default(),
-        }
-    }
-}
 
 pub fn update_game_camera(
     time: Res<Time>,
     input: Res<ButtonInput<KeyCode>>,
     buttons: Res<ButtonInput<MouseButton>>,
     mut motion_evr: EventReader<MouseMotion>,
-    mut q: Query<(&mut Transform, &mut Projection), With<GameCamera>>,
+    mut q: Query<&mut Transform, With<GameCamera>>,
 ) {
-    let (mut transform, mut projection) = q.single_mut();
-
-    if let Projection::Perspective(ref mut p) = *projection {
-        p.aspect_ratio = 1280. / 720.;
-    }
+    let mut transform = q.single_mut();
 
     let speed = if input.pressed(KeyCode::ShiftLeft) {
-        500.
+        15.
     } else {
-        100.
+        5.
     };
 
     let mut v = Vec3::ZERO;

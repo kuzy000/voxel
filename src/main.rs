@@ -1,23 +1,12 @@
 use bevy::{
-    ecs::system::{lifetimeless::SRes, SystemParamItem},
-    prelude::*,
-    render::{
-        camera::CameraProjection,
-        extract_component::ExtractComponentPlugin,
-        extract_resource::{ExtractResource, ExtractResourcePlugin},
-        render_asset::{
+    core_pipeline::{fxaa::Fxaa, prepass::{DeferredPrepass, DepthPrepass, MotionVectorPrepass, NormalPrepass}}, ecs::system::{lifetimeless::SRes, SystemParamItem}, pbr::{CascadeShadowConfigBuilder, DefaultOpaqueRendererMethod, DirectionalLightShadowMap, ScreenSpaceAmbientOcclusionBundle}, prelude::*, render::{
+        camera::CameraProjection, extract_component::ExtractComponentPlugin, extract_resource::{ExtractResource, ExtractResourcePlugin}, render_asset::{
             PrepareAssetError, RenderAsset, RenderAssetPlugin, RenderAssetUsages, RenderAssets,
-        },
-        render_graph::{self, RenderGraph, RenderLabel},
-        render_resource::{
+        }, render_graph::{self, RenderGraph, RenderLabel}, render_resource::{
             binding_types::{storage_buffer_read_only, texture_storage_2d, uniform_buffer},
             *,
-        },
-        renderer::{RenderContext, RenderDevice, RenderQueue},
-        texture::ImageSampler,
-        Extract, Render, RenderApp, RenderSet,
-    },
-    window::WindowPlugin,
+        }, renderer::{RenderContext, RenderDevice, RenderQueue}, texture::ImageSampler, Extract, Render, RenderApp, RenderPlugin, RenderSet
+    }, window::WindowPlugin
 };
 use camera::*;
 use import::*;
@@ -36,6 +25,9 @@ fn main() {
 
     App::new()
         .insert_resource(ClearColor(Color::BLACK))
+        .insert_resource(Msaa::Off)
+        .insert_resource(DefaultOpaqueRendererMethod::deferred())
+        .insert_resource(DirectionalLightShadowMap { size: 4096 })
         .add_plugins((
             DefaultPlugins.set(WindowPlugin {
                 primary_window: Some(Window {
@@ -44,17 +36,17 @@ fn main() {
                     ..default()
                 }),
                 ..default()
+            }).set(RenderPlugin {
+                ..default()
             }),
-            VoxelTracerPlugin,
+            //VoxelTracerPlugin,
         ))
         .add_systems(Startup, setup)
-        //.add_systems(Update, update_camera)
         .add_systems(Update, update_game_camera)
         .run();
 }
 
-
-fn setup(
+fn _setup_voxel_tracer(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
     mut voxel_trees: ResMut<Assets<VoxelTree>>,
@@ -63,6 +55,7 @@ fn setup(
         Extent3d {
             width: SCREEN_SIZE.0,
             height: SCREEN_SIZE.1,
+
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
@@ -86,10 +79,10 @@ fn setup(
     });
     commands.spawn(Camera2dBundle::default());
 
-    commands.spawn(GameCameraBundle {
-        transform: Transform::from_xyz(-10.0, -5.0, -5.0).looking_at(Vec3::ZERO, Vec3::Y),
-        ..Default::default()
-    });
+    // commands.spawn(GameCameraBundle {
+    //     transform: Transform::from_xyz(-10.0, -5.0, -5.0).looking_at(Vec3::ZERO, Vec3::Y),
+    //     ..Default::default()
+    // });
 
     const DEPTH: u8 = 6;
 
@@ -108,6 +101,97 @@ fn setup(
     });
 }
 
+fn setup(
+    mut commands: Commands,
+    //mut images: ResMut<Assets<Image>>,
+    //mut voxel_trees: ResMut<Assets<VoxelTree>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
+) {
+    // circular base
+//    commands.spawn(PbrBundle {
+//        mesh: meshes.add(Circle::new(4.0)),
+//        material: materials.add(Color::WHITE),
+//        transform: Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+//        ..default()
+//    });
+//    // cube
+//    commands.spawn(PbrBundle {
+//        mesh: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
+//        material: materials.add(StandardMaterial {
+//            base_color: Color::rgb_u8(124, 144, 255),
+//            ..default()
+//        }),
+//        transform: Transform::from_xyz(0.0, 0.5, 0.0),
+//        ..default()
+//    });
+    
+    // gltf
+    commands.spawn(SceneBundle {
+        scene: asset_server.load("models/FlightHelmet/FlightHelmet.gltf#Scene0"),
+        ..default()
+    });
+
+    // light
+    commands.spawn(PointLightBundle {
+        point_light: PointLight {
+            shadows_enabled: true,
+            ..default()
+        },
+        transform: Transform::from_xyz(4.0, 8.0, 4.0),
+        ..default()
+    });
+    
+//    commands.spawn(DirectionalLightBundle {
+//        transform: Transform::from_xyz(50.0, 50.0, 50.0).looking_at(Vec3::ZERO, Vec3::Y),
+//        directional_light: DirectionalLight {
+//            illuminance: 1_500.,
+//            ..default()
+//        },
+//        ..default()
+//    });
+    
+    
+    commands.spawn(DirectionalLightBundle {
+        directional_light: DirectionalLight {
+            shadows_enabled: true,
+            ..default()
+        },
+        // This is a relatively small scene, so use tighter shadow
+        // cascade bounds than the default for better quality.
+        // We also adjusted the shadow map to be larger since we're
+        // only using a single cascade.
+        cascade_shadow_config: CascadeShadowConfigBuilder {
+            num_cascades: 1,
+            maximum_distance: 1.6,
+            ..default()
+        }
+        .into(),
+        ..default()
+    });
+
+
+    // camera
+    commands.spawn((
+        GameCamera,
+        DepthPrepass,
+        NormalPrepass,
+        MotionVectorPrepass,
+        DeferredPrepass,
+        Fxaa::default(),
+        Camera3dBundle {
+            transform: Transform::from_xyz(-2.5, 4.5, 9.0).looking_at(Vec3::ZERO, Vec3::Y),
+            ..default()
+        },
+        EnvironmentMapLight {
+            diffuse_map: asset_server.load("environment_maps/pisa_diffuse_rgb9e5_zstd.ktx2"),
+            specular_map: asset_server.load("environment_maps/pisa_specular_rgb9e5_zstd.ktx2"),
+            intensity: 250.0,
+        },
+    ));
+}
+
 struct VoxelTracerPlugin;
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
@@ -115,11 +199,8 @@ struct VoxelTracerLabel;
 
 impl Plugin for VoxelTracerPlugin {
     fn build(&self, app: &mut App) {
-        // Extract the game of life image resource from the main world into the render world
-        // for operation on by the compute shader and display on the sprite.
         app.add_plugins(ExtractResourcePlugin::<VoxelTracer>::default());
         app.add_plugins(RenderAssetPlugin::<VoxelTree>::default());
-        app.add_plugins(ExtractComponentPlugin::<GameCamera>::default());
         // app.add_plugins(FrameTimeDiagnosticsPlugin::default());
         // app.add_plugins(LogDiagnosticsPlugin::default());
         app.init_asset::<VoxelTree>();
