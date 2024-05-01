@@ -1,5 +1,3 @@
-#[allow(unused)]
-
 use bevy::{input::mouse::MouseMotion, prelude::*};
 
 #[derive(Component)]
@@ -15,9 +13,9 @@ pub fn update_game_camera(
     let mut transform = q.single_mut();
 
     let speed = if input.pressed(KeyCode::ShiftLeft) {
-        15.
+        1500.
     } else {
-        5.
+        500.
     };
 
     let mut v = Vec3::ZERO;

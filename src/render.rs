@@ -1,29 +1,18 @@
-use bevy::{prelude::*, render::render_resource::{StorageBuffer, UniformBuffer}};
+use bevy::{
+    core_pipeline::prepass::ViewPrepassTextures,
+    prelude::*,
+    render::{
+        render_resource::{binding_types::texture_2d, StorageBuffer, UniformBuffer},
+        view::{ViewUniform, ViewUniforms},
+    },
+};
 
 use crate::*;
 
 pub const SCREEN_SIZE: (u32, u32) = (1280, 720);
 pub const WORKGROUP_SIZE: u32 = 8;
 
-#[derive(Clone, ShaderType, Default)]
-pub struct ViewUniform {
-    pub view_proj: Mat4,
-    pub inverse_view_proj: Mat4,
-    pub view: Mat4,
-    pub inverse_view: Mat4,
-    pub projection: Mat4,
-    pub inverse_projection: Mat4,
-    // viewport(x_origin, y_origin, width, height)
-    //    viewport: Vec4,
-    //    frustum: [Vec4; 6]
-}
-
-#[derive(Resource, Default)]
-pub struct ViewUniforms {
-    pub uniforms: UniformBuffer<ViewUniform>,
-}
-
-#[derive(Resource, Default)]
+#[derive(Default, Resource)]
 pub struct GpuVoxelTree {
     pub nodes: StorageBuffer<Vec<VoxelNode>>,
     pub leafs: StorageBuffer<Vec<VoxelLeaf>>,
@@ -37,7 +26,6 @@ impl RenderAsset for VoxelTree {
         RenderAssetUsages::RENDER_WORLD
     }
 
-    /// Converts the extracted image into a [`GpuImage`].
     fn prepare_asset(
         self,
         (device, queue): &mut SystemParamItem<Self::Param>,
@@ -119,113 +107,141 @@ impl VoxelTracer {
 }
 
 #[derive(Resource)]
-pub struct VoxelTracerBindGroup(BindGroup);
+pub struct VoxelTracerPipelines {
+    view_bind_group_layout: BindGroupLayout,
+    prepass_textures_bind_group_layout: BindGroupLayout,
+    voxel_tree_bind_group_layout: BindGroupLayout,
 
-pub fn extract_view(
-    mut commands: Commands,
-    query: Extract<Query<(Entity, &Projection, &Transform), With<GameCamera>>>,
-) {
-    let (entity, proj, trs) = query.single();
-    let mut commands = commands.get_or_spawn(entity);
-
-    commands.insert(proj.clone());
-    commands.insert(trs.clone());
+    pipeline: CachedComputePipelineId,
 }
 
-pub fn prepare_view(
-    mut view_uniforms: ResMut<ViewUniforms>,
-    render_device: Res<RenderDevice>,
-    render_queue: Res<RenderQueue>,
-    q: Query<(&Projection, &Transform), With<GameCamera>>,
-) {
-    let (proj, trs) = q.single();
-
-    let inverse_view = trs.compute_matrix();
-    let view = inverse_view.inverse();
-
-    let projection = proj.get_projection_matrix();
-    let view_proj = projection * view;
-
-    let view = ViewUniform {
-        view_proj,
-        inverse_view_proj: view_proj.inverse(),
-        view,
-        inverse_view,
-        projection: projection,
-        inverse_projection: projection.inverse(),
-    };
-
-    view_uniforms.uniforms.set(view);
-
-    view_uniforms
-        .uniforms
-        .write_buffer(&render_device, &render_queue);
-}
-
-pub fn prepare_bind_group(
-    mut commands: Commands,
-    pipeline: Res<VoxelTracerPipeline>,
-    gpu_images: Res<RenderAssets<Image>>,
-    gpu_voxel_trees: Res<RenderAssets<VoxelTree>>,
-    voxel_tracer: Res<VoxelTracer>,
-    view_uniforms: Res<ViewUniforms>,
-    render_device: Res<RenderDevice>,
-) {
-    let bind_group = voxel_tracer
-        .as_bind_group(
-            &pipeline.texture_bind_group_layout,
-            &render_device,
-            &gpu_images,
-            &gpu_voxel_trees,
-            &view_uniforms,
-        )
-        .unwrap();
-
-    commands.insert_resource(VoxelTracerBindGroup(bind_group));
-}
-
-#[derive(Resource)]
-pub struct VoxelTracerPipeline {
-    texture_bind_group_layout: BindGroupLayout,
-    init_pipeline: CachedComputePipelineId,
-    update_pipeline: CachedComputePipelineId,
-}
-
-impl FromWorld for VoxelTracerPipeline {
+impl FromWorld for VoxelTracerPipelines {
     fn from_world(world: &mut World) -> Self {
         let render_device = world.resource::<RenderDevice>();
+        let pipeline_cache = world.resource::<PipelineCache>();
+
         let texture_bind_group_layout = VoxelTracer::bind_group_layout(render_device);
         let shader = world.resource::<AssetServer>().load("shaders/test.wgsl");
-        let pipeline_cache = world.resource::<PipelineCache>();
-        let init_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+
+        let view_bind_group_layout = render_device.create_bind_group_layout(
+            "voxel_tracer_view_bind_group_layout",
+            &BindGroupLayoutEntries::sequential(
+                ShaderStages::COMPUTE,
+                (uniform_buffer::<ViewUniform>(true),),
+            ),
+        );
+
+        let prepass_textures_bind_group_layout = render_device.create_bind_group_layout(
+            "voxel_tracer_prepass_textures_bind_group_layout",
+            &BindGroupLayoutEntries::sequential(
+                ShaderStages::COMPUTE,
+                (texture_storage_2d(
+                    TextureFormat::Rgba32Uint,
+                    StorageTextureAccess::ReadWrite,
+                ),),
+            ),
+        );
+
+        let voxel_tree_bind_group_layout = render_device.create_bind_group_layout(
+            "voxel_tracer_voxel_tree_bind_group_layout",
+            &BindGroupLayoutEntries::sequential(
+                ShaderStages::COMPUTE,
+                (
+                    storage_buffer_read_only::<Vec<VoxelNode>>(false),
+                    storage_buffer_read_only::<Vec<VoxelLeaf>>(false),
+                ),
+            ),
+        );
+
+        let pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
             label: None,
-            layout: vec![texture_bind_group_layout.clone()],
-            push_constant_ranges: Vec::new(),
-            shader: shader.clone(),
-            shader_defs: vec![],
-            entry_point: Cow::from("init"),
-        });
-        let update_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
-            label: None,
-            layout: vec![texture_bind_group_layout.clone()],
+            layout: vec![
+                view_bind_group_layout.clone(),
+                prepass_textures_bind_group_layout.clone(),
+                voxel_tree_bind_group_layout.clone(),
+            ],
             push_constant_ranges: Vec::new(),
             shader,
             shader_defs: vec![],
             entry_point: Cow::from("update"),
         });
 
-        VoxelTracerPipeline {
-            texture_bind_group_layout,
-            init_pipeline,
-            update_pipeline,
+        VoxelTracerPipelines {
+            view_bind_group_layout,
+            prepass_textures_bind_group_layout,
+            voxel_tree_bind_group_layout,
+            pipeline,
         }
     }
+}
+
+#[derive(Resource)]
+pub struct VoxelTracerBindGroups {
+    view: BindGroup,
+    prepass_textures: BindGroup,
+    voxel_tree: BindGroup,
+}
+
+pub fn prepare_voxel_tracer_bind_groups(
+    mut commands: Commands,
+    render_device: Res<RenderDevice>,
+    voxel_tracer: Res<VoxelTracer>,
+    gpu_voxel_trees: Res<RenderAssets<VoxelTree>>,
+    pipelines: Res<VoxelTracerPipelines>,
+    view_uniforms: Res<ViewUniforms>,
+    q: Query<&ViewPrepassTextures>,
+) {
+    let Some(view_uniforms) = view_uniforms.uniforms.binding() else {
+        return;
+    };
+
+    let prepass_textures = q.single();
+
+    let view = render_device.create_bind_group(
+        "voxel_tracer_view_bind_group",
+        &pipelines.view_bind_group_layout,
+        &BindGroupEntries::single(view_uniforms.clone()),
+    );
+
+    let prepass_textures = render_device.create_bind_group(
+        "voxel_tracer_prepass_textures_bind_group",
+        &pipelines.prepass_textures_bind_group_layout,
+        &BindGroupEntries::single(prepass_textures.deferred_view().unwrap()),
+    );
+
+    let voxel_tree = gpu_voxel_trees
+        .get(voxel_tracer.voxel_tree.clone())
+        .ok_or(AsBindGroupError::RetryNextUpdate)
+        .unwrap();
+
+    let voxel_nodes = voxel_tree
+        .nodes
+        .binding()
+        .ok_or(AsBindGroupError::RetryNextUpdate)
+        .unwrap();
+
+    let voxel_leafs = voxel_tree
+        .leafs
+        .binding()
+        .ok_or(AsBindGroupError::RetryNextUpdate)
+        .unwrap();
+
+    let voxel_tree = render_device.create_bind_group(
+        "voxel_tracer_voxel_tree_bind_group",
+        &pipelines.voxel_tree_bind_group_layout,
+        &BindGroupEntries::sequential((voxel_nodes, voxel_leafs)),
+    );
+
+    commands.insert_resource(VoxelTracerBindGroups {
+        view,
+        prepass_textures,
+        voxel_tree,
+    });
 }
 
 #[derive(Debug)]
 pub enum VoxelTracerState {
     Loading,
-    Init,
     Update,
 }
 
@@ -243,28 +259,21 @@ impl Default for VoxelTracerRenderNode {
 
 impl render_graph::Node for VoxelTracerRenderNode {
     fn update(&mut self, world: &mut World) {
-        let pipeline = world.resource::<VoxelTracerPipeline>();
+        let pipelines = world.resource::<VoxelTracerPipelines>();
         let pipeline_cache = world.resource::<PipelineCache>();
 
         // if the corresponding pipeline has loaded, transition to the next stage
         match self.state {
             VoxelTracerState::Loading => {
                 if let CachedPipelineState::Ok(_) =
-                    pipeline_cache.get_compute_pipeline_state(pipeline.init_pipeline)
-                {
-                    self.state = VoxelTracerState::Init;
-                }
-            }
-            VoxelTracerState::Init => {
-                if let CachedPipelineState::Ok(_) =
-                    pipeline_cache.get_compute_pipeline_state(pipeline.update_pipeline)
+                    pipeline_cache.get_compute_pipeline_state(pipelines.pipeline)
                 {
                     self.state = VoxelTracerState::Update;
                 }
             }
             VoxelTracerState::Update => {
                 if pipeline_cache
-                    .get_compute_pipeline(pipeline.update_pipeline)
+                    .get_compute_pipeline(pipelines.pipeline)
                     .is_none()
                 {
                     self.state = VoxelTracerState::Loading;
@@ -279,33 +288,25 @@ impl render_graph::Node for VoxelTracerRenderNode {
         render_context: &mut RenderContext,
         world: &World,
     ) -> Result<(), render_graph::NodeRunError> {
-        let texture_bind_group = &world.resource::<VoxelTracerBindGroup>().0;
         let pipeline_cache = world.resource::<PipelineCache>();
-        let pipeline = world.resource::<VoxelTracerPipeline>();
+        let pipeline = world.resource::<VoxelTracerPipelines>();
+
+        let bind_groups = &world.resource::<VoxelTracerBindGroups>();
 
         let mut pass = render_context
             .command_encoder()
             .begin_compute_pass(&ComputePassDescriptor::default());
 
-        pass.set_bind_group(0, texture_bind_group, &[]);
+        pass.set_bind_group(0, &bind_groups.view, &[]);
+        pass.set_bind_group(1, &bind_groups.prepass_textures, &[]);
+        pass.set_bind_group(2, &bind_groups.voxel_tree, &[]);
 
         // select the pipeline based on the current state
         match self.state {
             VoxelTracerState::Loading => {}
-            VoxelTracerState::Init => {
-                let init_pipeline = pipeline_cache
-                    .get_compute_pipeline(pipeline.init_pipeline)
-                    .unwrap();
-                pass.set_pipeline(init_pipeline);
-                pass.dispatch_workgroups(
-                    (SIZE.0 / WORKGROUP_SIZE).max(1),
-                    (SIZE.1 / WORKGROUP_SIZE).max(1),
-                    (SIZE.2 / WORKGROUP_SIZE).max(1),
-                );
-            }
             VoxelTracerState::Update => {
                 let update_pipeline = pipeline_cache
-                    .get_compute_pipeline(pipeline.update_pipeline)
+                    .get_compute_pipeline(pipeline.pipeline)
                     .unwrap();
                 pass.set_pipeline(update_pipeline);
                 pass.dispatch_workgroups(
