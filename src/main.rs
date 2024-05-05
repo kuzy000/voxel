@@ -3,22 +3,22 @@ use bevy::{
         fxaa::Fxaa,
         prepass::{DeferredPrepass, DepthPrepass, MotionVectorPrepass, NormalPrepass},
     },
+    diagnostic::{FrameTimeDiagnosticsPlugin},
     ecs::system::{lifetimeless::SRes, SystemParamItem},
-    pbr::{CascadeShadowConfigBuilder, DefaultOpaqueRendererMethod, DirectionalLightShadowMap},
+    pbr::{DefaultOpaqueRendererMethod, DirectionalLightShadowMap},
     prelude::*,
     render::{
-        extract_resource::{ExtractResource, ExtractResourcePlugin},
+        extract_resource::{ExtractResource},
         render_asset::{
             PrepareAssetError, RenderAsset, RenderAssetPlugin, RenderAssetUsages, RenderAssets,
         },
-        render_graph::{self, RenderGraph, RenderLabel},
+        render_graph::{self, RenderLabel},
         render_resource::{
             binding_types::{storage_buffer_read_only, texture_storage_2d, uniform_buffer},
             *,
         },
         renderer::{RenderContext, RenderDevice, RenderQueue},
-        texture::ImageSampler,
-        Extract, Render, RenderApp, RenderPlugin, RenderSet,
+        texture::ImageSampler, RenderApp,
     },
     window::WindowPlugin,
 };
@@ -34,6 +34,7 @@ mod import;
 mod material;
 mod math;
 mod render;
+mod ui;
 mod voxel_tree;
 
 fn main() {
@@ -59,6 +60,7 @@ fn main() {
                 ..default()
             },
             VoxelTracerPlugin,
+            ui::GameUiPlugin,
         ))
         .add_systems(Startup, setup)
         .add_systems(Update, update_game_camera)
@@ -152,7 +154,6 @@ fn setup(
     render_device: ResMut<RenderDevice>,
     render_queue: ResMut<RenderQueue>,
 ) {
-    
     const DEPTH: u8 = 6;
 
     let mut voxel_tree = VoxelTree::new(DEPTH);
@@ -165,16 +166,20 @@ fn setup(
 
     {
         gpu_voxel_tree.nodes.set(voxel_tree.nodes.clone());
-        gpu_voxel_tree.nodes.write_buffer(&render_device, &render_queue);
+        gpu_voxel_tree
+            .nodes
+            .write_buffer(&render_device, &render_queue);
 
         gpu_voxel_tree.leafs.set(voxel_tree.leafs.clone());
-        gpu_voxel_tree.leafs.write_buffer(&render_device, &render_queue);
+        gpu_voxel_tree
+            .leafs
+            .write_buffer(&render_device, &render_queue);
     }
 
     voxel_trees.add(voxel_tree);
-    
+
     let size = 4f32.powf(6.0f32);
-    
+
     commands.spawn(MaterialMeshBundle::<VoxelTreeMaterial> {
         mesh: meshes.add(Cuboid::new(size, size, size)),
         material: vt_materials.add(VoxelTreeMaterial {
@@ -186,7 +191,7 @@ fn setup(
             extension: VoxelTreeMaterialExtension {
                 voxel_nodes: gpu_voxel_tree.nodes.buffer().unwrap().clone(),
                 voxel_leafs: gpu_voxel_tree.leafs.buffer().unwrap().clone(),
-            }
+            },
         }),
         transform: Transform::from_translation(Vec3::splat(size * 0.5)),
         ..default()
@@ -246,8 +251,7 @@ impl Plugin for VoxelTracerPlugin {
     fn build(&self, app: &mut App) {
         // app.add_plugins(ExtractResourcePlugin::<VoxelTracer>::default());
         app.add_plugins(RenderAssetPlugin::<VoxelTree>::default());
-        // app.add_plugins(FrameTimeDiagnosticsPlugin::default());
-        // app.add_plugins(LogDiagnosticsPlugin::default());
+        app.add_plugins(FrameTimeDiagnosticsPlugin::default());
         app.init_asset::<VoxelTree>();
         let render_app = app.sub_app_mut(RenderApp);
 
