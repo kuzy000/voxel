@@ -1,7 +1,4 @@
-use bevy::{
-    diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin},
-    prelude::*,
-};
+use bevy::{diagnostic::DiagnosticsStore, prelude::*};
 
 const FONT_SIZE: f32 = 18.;
 
@@ -15,23 +12,61 @@ impl Plugin for GameUiPlugin {
 }
 
 #[derive(Component)]
-pub struct TextFps;
+pub struct DiagContainer;
 
-pub fn update_fps(diag: Res<DiagnosticsStore>, mut q: Query<&mut Text, With<TextFps>>) {
-    let mut text_fps = q.single_mut();
+#[derive(Component)]
+pub struct DiagChild;
 
-    let Some(fps) = diag.get_measurement(&FrameTimeDiagnosticsPlugin::FPS) else {
-        return;
-    };
+pub fn update_fps(
+    mut commands: Commands,
+    diag: Res<DiagnosticsStore>,
+    q_parent: Query<(Entity, Option<&Children>), With<DiagContainer>>,
+    mut q_child: Query<&mut Text, With<DiagChild>>,
+) {
+    let diags: Vec<_> = diag.iter().collect();
 
-    *text_fps = Text::from_section(
-        format!("FPS: {:.2}", fps.value),
-        TextStyle {
-            font_size: FONT_SIZE,
-            color: Color::rgb(0.9, 0.9, 0.9),
-            ..default()
-        },
-    );
+    for (container_id, children) in q_parent.iter() {
+        let children_len = children.map_or(0, |c| c.len());
+
+        let mut idx = 0;
+        for diag in &diags {
+            let Some(value) = diag.value() else {
+                continue;
+            };
+
+            let text = Text::from_section(
+                format!("{}: {:.2} {}", diag.path().as_str(), value, diag.suffix),
+                TextStyle {
+                    font_size: FONT_SIZE,
+                    color: Color::rgb(0.9, 0.9, 0.9),
+                    ..default()
+                },
+            );
+
+            if idx < children_len {
+                let children = children.unwrap();
+                let mut text_mut = q_child.get_mut(children[idx]).unwrap();
+                *text_mut = text;
+            } else {
+                commands.entity(container_id).with_children(|parent| {
+                    parent
+                        .spawn(TextBundle {
+                            text: text,
+                            ..default()
+                        })
+                        .insert(DiagChild);
+                });
+            }
+
+            idx += 1;
+        }
+
+        if children_len > idx {
+            let children = children.unwrap();
+            let (_, b) = children.split_at(children.len());
+            commands.entity(container_id).remove_children(b);
+        }
+    }
 }
 
 pub fn setup(mut commands: Commands) {
@@ -53,24 +88,11 @@ pub fn setup(mut commands: Commands) {
                     style: Style {
                         width: Val::Px(250.),
                         margin: UiRect::bottom(Val::Px(15.)),
+                        flex_direction: FlexDirection::Column,
                         ..default()
                     },
                     ..default()
                 })
-                .with_children(|parent| {
-                    parent
-                        .spawn(TextBundle {
-                            text: Text::from_section(
-                                "",
-                                TextStyle {
-                                    font_size: FONT_SIZE,
-                                    color: Color::rgb(0.9, 0.9, 0.9),
-                                    ..default()
-                                },
-                            ),
-                            ..default()
-                        })
-                        .insert(TextFps);
-                });
+                .insert(DiagContainer);
         });
 }
