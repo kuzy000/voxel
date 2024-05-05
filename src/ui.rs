@@ -23,14 +23,15 @@ pub fn update_fps(
     q_parent: Query<(Entity, Option<&Children>), With<DiagContainer>>,
     mut q_child: Query<&mut Text, With<DiagChild>>,
 ) {
-    let diags: Vec<_> = diag.iter().collect();
+    let mut diags: Vec<_> = diag.iter().collect();
+    diags.sort_by(|a, b| a.path().as_str().cmp(b.path().as_str()));
 
     for (container_id, children) in q_parent.iter() {
         let children_len = children.map_or(0, |c| c.len());
 
         let mut idx = 0;
         for diag in &diags {
-            let Some(value) = diag.value() else {
+            let Some(value) = diag.smoothed() else {
                 continue;
             };
 

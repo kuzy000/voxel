@@ -3,12 +3,12 @@ use bevy::{
         fxaa::Fxaa,
         prepass::{DeferredPrepass, DepthPrepass, MotionVectorPrepass, NormalPrepass},
     },
-    diagnostic::{FrameTimeDiagnosticsPlugin},
+    diagnostic::{EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin, SystemInformationDiagnosticsPlugin},
     ecs::system::{lifetimeless::SRes, SystemParamItem},
     pbr::{DefaultOpaqueRendererMethod, DirectionalLightShadowMap},
     prelude::*,
     render::{
-        extract_resource::{ExtractResource},
+        extract_resource::ExtractResource,
         render_asset::{
             PrepareAssetError, RenderAsset, RenderAssetPlugin, RenderAssetUsages, RenderAssets,
         },
@@ -252,6 +252,8 @@ impl Plugin for VoxelTracerPlugin {
         // app.add_plugins(ExtractResourcePlugin::<VoxelTracer>::default());
         app.add_plugins(RenderAssetPlugin::<VoxelTree>::default());
         app.add_plugins(FrameTimeDiagnosticsPlugin::default());
+        app.add_plugins(EntityCountDiagnosticsPlugin::default());
+        app.add_plugins(SystemInformationDiagnosticsPlugin::default());
         app.init_asset::<VoxelTree>();
         let render_app = app.sub_app_mut(RenderApp);
 
