@@ -6,6 +6,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bevy = { version = "0.13.2", features = ["file_watcher"] }
 color-backtrace = "0.6.1"
 dot_vox = "5.1.1"
+
+[dependencies.bevy]
+git = "https://github.com/bevyengine/bevy"
+rev = "d9d305dab5b3b7a12a634ea7adb5c5a4c6406ec1"
+features = ["file_watcher"]

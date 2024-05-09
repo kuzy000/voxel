@@ -1,3 +1,6 @@
+// TODO: remove it at some point
+#![allow(unused)]
+
 use bevy::{
     core_pipeline::{
         fxaa::Fxaa,
@@ -146,7 +149,7 @@ fn setup(
     //mut images: ResMut<Assets<Image>>,
     //mut voxel_trees: ResMut<Assets<VoxelTree>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    // mut materials: ResMut<Assets<StandardMaterial>>,
     mut vt_materials: ResMut<Assets<VoxelTreeMaterial>>,
     mut gpu_voxel_tree: ResMut<GpuVoxelTree>,
     mut voxel_trees: ResMut<Assets<VoxelTree>>,
@@ -250,7 +253,7 @@ struct VoxelTracerLabel;
 impl Plugin for VoxelTracerPlugin {
     fn build(&self, app: &mut App) {
         // app.add_plugins(ExtractResourcePlugin::<VoxelTracer>::default());
-        app.add_plugins(RenderAssetPlugin::<VoxelTree>::default());
+        app.add_plugins(RenderAssetPlugin::<GpuVoxelTree>::default());
         app.add_plugins(FrameTimeDiagnosticsPlugin::default());
         app.add_plugins(EntityCountDiagnosticsPlugin::default());
         app.add_plugins(SystemInformationDiagnosticsPlugin::default());

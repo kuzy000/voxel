@@ -2,8 +2,7 @@ use bevy::{
     core_pipeline::prepass::ViewPrepassTextures,
     prelude::*,
     render::{
-        render_resource::{binding_types::texture_2d, StorageBuffer, UniformBuffer},
-        view::{ViewUniform, ViewUniforms},
+        render_resource::{binding_types::texture_2d, StorageBuffer, UniformBuffer}, texture::GpuImage, view::{ViewUniform, ViewUniforms}
     },
 };
 
@@ -18,27 +17,27 @@ pub struct GpuVoxelTree {
     pub leafs: StorageBuffer<Vec<VoxelLeaf>>,
 }
 
-impl RenderAsset for VoxelTree {
-    type PreparedAsset = GpuVoxelTree;
+impl RenderAsset for GpuVoxelTree {
+    type SourceAsset = VoxelTree;
     type Param = (SRes<RenderDevice>, SRes<RenderQueue>);
 
-    fn asset_usage(&self) -> RenderAssetUsages {
+    fn asset_usage(_source_asset: &Self::SourceAsset) -> RenderAssetUsages {
         RenderAssetUsages::RENDER_WORLD
     }
-
+    
     fn prepare_asset(
-        self,
-        (device, queue): &mut SystemParamItem<Self::Param>,
-    ) -> Result<Self::PreparedAsset, PrepareAssetError<Self>> {
+            source_asset: Self::SourceAsset,
+            (device, queue): &mut SystemParamItem<Self::Param>,
+        ) -> Result<Self, PrepareAssetError<Self::SourceAsset>> {
         let mut nodes = StorageBuffer::default();
-        nodes.set(self.nodes.clone());
+        nodes.set(source_asset.nodes.clone());
         nodes.write_buffer(device, queue);
 
         let mut leafs = StorageBuffer::default();
-        leafs.set(self.leafs.clone());
+        leafs.set(source_asset.leafs.clone());
         leafs.write_buffer(device, queue);
 
-        Ok(GpuVoxelTree { nodes, leafs })
+        Ok(Self { nodes, leafs })
     }
 }
 
@@ -54,12 +53,12 @@ impl VoxelTracer {
         &self,
         layout: &BindGroupLayout,
         render_device: &RenderDevice,
-        images: &RenderAssets<Image>,
-        voxel_trees: &RenderAssets<VoxelTree>,
+        images: &RenderAssets<GpuImage>,
+        voxel_trees: &RenderAssets<GpuVoxelTree>,
         view_uniforms: &ViewUniforms,
     ) -> Result<BindGroup, AsBindGroupError> {
         let texture = images
-            .get(self.texture.clone())
+            .get(&mut self.texture.clone())
             .ok_or(AsBindGroupError::RetryNextUpdate)?;
 
         let view = view_uniforms
@@ -68,7 +67,7 @@ impl VoxelTracer {
             .ok_or(AsBindGroupError::RetryNextUpdate)?;
 
         let voxel_tree = voxel_trees
-            .get(self.voxel_tree.clone())
+            .get(&mut self.voxel_tree.clone())
             .ok_or(AsBindGroupError::RetryNextUpdate)?;
 
         let voxel_nodes = voxel_tree
@@ -186,7 +185,7 @@ pub fn prepare_voxel_tracer_bind_groups(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     voxel_tracer: Res<VoxelTracer>,
-    gpu_voxel_trees: Res<RenderAssets<VoxelTree>>,
+    gpu_voxel_trees: Res<RenderAssets<GpuVoxelTree>>,
     pipelines: Res<VoxelTracerPipelines>,
     view_uniforms: Res<ViewUniforms>,
     q: Query<&ViewPrepassTextures>,
@@ -210,7 +209,7 @@ pub fn prepare_voxel_tracer_bind_groups(
     );
 
     let voxel_tree = gpu_voxel_trees
-        .get(voxel_tracer.voxel_tree.clone())
+        .get(&mut voxel_tracer.voxel_tree.clone())
         .ok_or(AsBindGroupError::RetryNextUpdate)
         .unwrap();
 

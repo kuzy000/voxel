@@ -39,7 +39,7 @@ pub fn update_fps(
                 format!("{}: {:.2} {}", diag.path().as_str(), value, diag.suffix),
                 TextStyle {
                     font_size: FONT_SIZE,
-                    color: Color::rgb(0.9, 0.9, 0.9),
+                    color: Color::srgb(0.9, 0.9, 0.9),
                     ..default()
                 },
             );
