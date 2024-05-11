@@ -28,71 +28,10 @@ struct VoxelNode {
 @group(0) @binding(2) var<storage, read> leafs: array<VoxelLeaf>;
 
 fn pos_to_idx(ipos: vec3<i32>) -> u32 {
-    return u32(ipos.x * 4 * 4 + ipos.y * 4 + ipos.z);
-}
-
-fn get_voxel(ipos: vec3<i32>) -> bool {
-    if (ipos.x < 0 || ipos.x >= 4) { return false; }
-    if (ipos.y < 0 || ipos.y >= 4) { return false; }
-    if (ipos.z < 0 || ipos.z >= 4) { return false; }
-
-    let i = pos_to_idx(ipos);
-    let leaf = leafs[0];
-    
-    if (i < 32) {
-        return (leaf.mask[0] & (1u << (i - 0))) > 0;
-    }
-    else {
-        return (leaf.mask[1] & (1u << (i - 32))) > 0;
-    }
-}
-
-// Branchless Voxel Raycasting
-// https://www.shadertoy.com/view/4dX3zl
-// http://www.cse.yorku.ca/~amana/research/grid.pdf
-fn ray_march_voxel_simple(pos: vec3<f32>, dir: vec3<f32>, offset: vec3<i32>, voxel_size: f32) -> RayMarchResult {
-    // Apply offset and scale as if `voxel_size = 1.f`
-    let local_pos = (pos - vec3<f32>(offset * VOXEL_DIM)) / voxel_size;
-
-    var ipos = vec3<i32>(floor(local_pos));
-    let istep = vec3<i32>(sign(dir));
-    
-    // let delta = abs(vec3(length(dir)) / dir);
-    let delta = abs(1. / dir);
-    var tmax = (sign(dir) * (vec3<f32>(ipos) - local_pos) + (sign(dir) * 0.5) + 0.5) * delta;
-    
-    var mask = vec3<bool>(false);
-    
-    for (var i = 0; i < MAX_STEPS; i++) {
-        if (get_voxel(ipos)) {
-            let normal = -normalize(vec3<f32>(mask) * vec3<f32>(istep));
-            let color = normal * .5 + .5;
-            let distance = min(tmax.x, min(tmax.y, tmax.z)) * voxel_size;
-            return RayMarchResult(normal, color, distance);
-        }
-
-        mask = tmax.xyz <= min(tmax.yzx, tmax.zxy);
-        
-        tmax += vec3<f32>(mask) * delta;
-        ipos += vec3<i32>(mask) * istep;
-    }
-    
-    return RayMarchResult(vec3<f32>(), vec3<f32>(), DST_MAX);
+    return u32(ipos.x * VOXEL_DIM * VOXEL_DIM + ipos.y * VOXEL_DIM + ipos.z);
 }
 
 fn get_voxel_leaf(index: u32, ipos: vec3<i32>) -> bool {
-    // TODO remove it
-    if (ipos.x < 0 || ipos.x >= 4) { return false; }
-    if (ipos.y < 0 || ipos.y >= 4) { return false; }
-    if (ipos.z < 0 || ipos.z >= 4) { return false; }
-    
-//    var s = true;
-//    s = s && ipos.x >= 1 && ipos.x <= 3;
-//    s = s && ipos.y >= 1 && ipos.y <= 3;
-//    s = s && ipos.z >= 1 && ipos.z <= 3;
-//
-//    return s;
-//    
     let i = pos_to_idx(ipos);
     let leaf = leafs[index];
     
@@ -105,11 +44,6 @@ fn get_voxel_leaf(index: u32, ipos: vec3<i32>) -> bool {
 }
 
 fn get_voxel_nodes(index: u32, ipos: vec3<i32>) -> bool {
-    // TODO remove it
-    if (ipos.x < 0 || ipos.x >= 4) { return false; }
-    if (ipos.y < 0 || ipos.y >= 4) { return false; }
-    if (ipos.z < 0 || ipos.z >= 4) { return false; }
-    
     let i = pos_to_idx(ipos);
     let node = nodes[index];
     
@@ -171,11 +105,15 @@ fn is_inside(pos: vec3f, a: vec3f, b: vec3f) -> bool {
     return true;
 }
 
+const voxel_sizes = array(
+    VOXEL_SIZE * f32(pow(f32(VOXEL_DIM), f32(u32(VOXEL_TREE_DEPTH) - 0))),
+    VOXEL_SIZE * f32(pow(f32(VOXEL_DIM), f32(u32(VOXEL_TREE_DEPTH) - 1))),
+    VOXEL_SIZE * f32(pow(f32(VOXEL_DIM), f32(u32(VOXEL_TREE_DEPTH) - 2))),
+    VOXEL_SIZE * f32(pow(f32(VOXEL_DIM), f32(u32(VOXEL_TREE_DEPTH) - 3))),
+    VOXEL_SIZE * f32(pow(f32(VOXEL_DIM), f32(u32(VOXEL_TREE_DEPTH) - 4))),
+    VOXEL_SIZE * f32(pow(f32(VOXEL_DIM), f32(u32(VOXEL_TREE_DEPTH) - 5))),
+);
 
-fn get_voxel_size(depth: u32) -> f32 {
-    // TODO: rewrite with loop?
-    return VOXEL_SIZE * f32(pow(f32(VOXEL_DIM), f32(u32(VOXEL_TREE_DEPTH) - depth)));
-}
 
 struct RayMarchFrame {
     index: u32,
@@ -189,8 +127,8 @@ fn trace(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
     var frames: array<RayMarchFrame, VOXEL_TREE_DEPTH>;
     
     var inter_t = 0.f;
-    if (!is_inside(pos, vec3f(0.), vec3f(get_voxel_size(0u)))) {
-        let intersection = ray_bbox(pos, dir, vec3f(0.), vec3f(get_voxel_size(0u)));
+    if (!is_inside(pos, vec3f(0.), vec3f(voxel_sizes[0]))) {
+        let intersection = ray_bbox(pos, dir, vec3f(0.), vec3f(voxel_sizes[0u]));
         if (!intersection.has) {
             return RayMarchResult(vec3<f32>(), vec3<f32>(), DST_MAX);
         }
@@ -203,10 +141,10 @@ fn trace(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
     var depth = 0;
 
     // TODO remove it it. It should already be inside the box
-    let global_pos = clamp(in_pos0, vec3f(0.), vec3f(get_voxel_size(0u)));
+    let global_pos = clamp(in_pos0, vec3f(0.), vec3f(voxel_sizes[0u]));
 
     // Apply offset and scale as if `voxel_size = 1.f`
-    frames[depth].local_pos = global_pos / get_voxel_size(1u);
+    frames[depth].local_pos = global_pos / voxel_sizes[1u];
 
     frames[depth].index = 0u;
     frames[depth].ipos = clamp(vec3<i32>(floor(frames[depth].local_pos)), vec3i(0), vec3i(VOXEL_DIM - 1));
@@ -228,25 +166,51 @@ fn trace(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
     
     // inside the root box
     if (inter_t == 0.f) {
+        // Calc the starting depth
+        for (var i = 0; i < VOXEL_TREE_DEPTH - 1; i++) {
+            let index = frames[depth].index;
+            let ipos = frames[depth].ipos;
+            let lpos = frames[depth].local_pos;
+
+            if (get_voxel_nodes(index, ipos)) {
+                let lpos_new = (lpos - vec3f(ipos)) * f32(VOXEL_DIM);
+
+                let ipos_new = vec3<i32>(floor(lpos_new));
+                let tmax_new = (sign(dir) * (vec3<f32>(ipos_new) - lpos_new) + (sign(dir) * 0.5) + 0.5) * delta;
+
+                depth += 1;
+
+                frames[depth].index = nodes[index].indices[pos_to_idx(ipos)];
+                frames[depth].local_pos = lpos_new;
+                frames[depth].ipos = ipos_new;
+                frames[depth].tmax = tmax_new;
+            }
+        }
     }
     else {
-        side_point = global_pos / get_voxel_size(0u);
+        side_point = global_pos / voxel_sizes[0];
         let v = abs(side_point - 0.5);
         mask = v.xyz >= max(v.xyz, max(v.yzx, v.zxy));
 
         frames[depth].tmax_prev = frames[depth].tmax - vec3f(mask) * delta;
     }
     
-    if (false) {
-        let color = vec3f(mask);
-        return RayMarchResult(vec3<f32>(), side_point, 0.f);
-        // return RayMarchResult(vec3<f32>(), vec3<f32>(mask), 0.f);
-    }
+    // if (false) {
+    //     let color = vec3f(mask);
+    //     return RayMarchResult(vec3<f32>(), side_point, 0.f);
+    //     // return RayMarchResult(vec3<f32>(), vec3<f32>(mask), 0.f);
+    // }
     
     var dst = 0.;
+    
+    let sign_dir01 = (sign(dir) * 0.5) + 0.5;
+    
+    let lpos_const = (1. - sign_dir01) * f32(VOXEL_DIM);
+    let ipos_const = vec3i(1. - sign_dir01) * (VOXEL_DIM - 1);
 
+    var distance = 0.;
     for (var i = 0; i < MAX_STEPS; i++) {
-        let ipos = frames[depth].ipos;
+        var ipos = frames[depth].ipos;
         if (ipos.x < 0 || ipos.x >= VOXEL_DIM || ipos.y < 0 || ipos.y >= VOXEL_DIM || ipos.z < 0 || ipos.z >= VOXEL_DIM) {
             if (depth == 0) {
                 break;
@@ -258,7 +222,12 @@ fn trace(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
             frames[depth].tmax_prev = frames[depth].tmax;
             frames[depth].tmax += vec3<f32>(mask) * delta;
             frames[depth].ipos += vec3<i32>(mask) * istep;
+            continue;
         }
+
+        let index = frames[depth].index;
+        ipos = frames[depth].ipos;
+        let lpos = frames[depth].local_pos;
 
         if (depth == VOXEL_TREE_DEPTH - 1) {
             let index = frames[depth].index;
@@ -285,234 +254,56 @@ fn trace(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
                 return RayMarchResult(normal, color, distance + inter_t);
             }
         }
-        else {
-            let index = frames[depth].index;
-            let ipos = frames[depth].ipos;
-            let lpos = frames[depth].local_pos;
-            if (get_voxel_nodes(index, ipos)) {
-                let tmax = frames[depth].tmax_prev;
+        else if (get_voxel_nodes(index, ipos)) {
+            let tmax = frames[depth].tmax_prev;
+            
+            var ipos_new = vec3i(0);
+            var lpos_new = vec3f(0);
+            var tmax_new = vec3f(0.);
+            var tmax_prev_new = vec3f(0.);
+            
+            //var lmask = tmax.xyz <= min(tmax.yzx, tmax.zxy);
+            var lmask = mask;
+            // if (!any(lmask)) {
+            //     lmask[0] = true;
+            // }
+            
+            {
+                let len = dot(tmax, vec3f(lmask));
                 
-                var ipos_new = vec3i(0);
-                var lpos_new = vec3f(0);
-                var tmax_new = vec3f(0.);
-                var tmax_prev_new = vec3f(0.);
-                if (any(mask)) {
-                    if (tmax.x < tmax.y) {
-                        if (tmax.z < tmax.x) {
-                            // zxy
-                            let len = tmax.z;
-                            
-                            let irx = 1. - (tmax.x - len) / delta.x;
-                            let iry = 1. - (tmax.y - len) / delta.y;
+                let ir = 1. - (tmax - len) / delta;
 
-                            if (sign(dir.z) > 0) {
-                                lpos_new.z = 0.;
-                                ipos_new.z = 0;
-                                tmax_new.z = delta.z;
-                            }
-                            else {
-                                lpos_new.z = f32(VOXEL_DIM);
-                                ipos_new.z = VOXEL_DIM - 1;
-                                tmax_new.z = delta.z;
-                            }
+                let lpos_new_t = f32(VOXEL_DIM) * ir;
+                tmax_new = delta * (1. - fract(lpos_new_t));
 
-                            if (sign(dir.x) > 0) {
-                                lpos_new.x = f32(VOXEL_DIM) * irx;
-                                ipos_new.x = i32(floor(lpos_new.x));
-                                tmax_new.x = delta.x * (1. - fract(lpos_new.x));
-                            }
-                            else {
-                                lpos_new.x = f32(VOXEL_DIM) - f32(VOXEL_DIM) * irx;
-                                ipos_new.x = i32(floor(lpos_new.x));
-                                tmax_new.x = delta.x * fract(lpos_new.x);
-                            }
-
-                            if (sign(dir.y) > 0) {
-                                lpos_new.y = f32(VOXEL_DIM) * iry;
-                                ipos_new.y = i32(floor(lpos_new.y));
-                                tmax_new.y = delta.y * (1. - fract(lpos_new.y));
-                            }
-                            else {
-                                lpos_new.y = f32(VOXEL_DIM) - f32(VOXEL_DIM) * iry;
-                                ipos_new.y = i32(floor(lpos_new.y));
-                                tmax_new.y = delta.y * fract(lpos_new.y);
-                            }
-
-                        }
-                        else {
-                            // xzy
-                            let len = tmax.x;
-                            
-                            let irz = 1. - (tmax.z - len) / delta.z;
-                            let iry = 1. - (tmax.y - len) / delta.y;
-
-                            if (sign(dir.x) > 0) {
-                                lpos_new.x = 0.;
-                                ipos_new.x = 0;
-                                tmax_new.x = delta.x;
-                            }
-                            else {
-                                lpos_new.x = f32(VOXEL_DIM);
-                                ipos_new.x = VOXEL_DIM - 1;
-                                tmax_new.x = delta.x;
-                            }
-
-                            if (sign(dir.z) > 0) {
-                                lpos_new.z = f32(VOXEL_DIM) * irz;
-                                ipos_new.z = i32(floor(lpos_new.z));
-                                tmax_new.z = delta.z * (1. - fract(lpos_new.z));
-                            }
-                            else {
-                                lpos_new.z = f32(VOXEL_DIM) - f32(VOXEL_DIM) * irz;
-                                ipos_new.z = i32(floor(lpos_new.z));
-                                tmax_new.z = delta.z * fract(lpos_new.z);
-                            }
-
-                            if (sign(dir.y) > 0) {
-                                lpos_new.y = f32(VOXEL_DIM) * iry;
-                                ipos_new.y = i32(floor(lpos_new.y));
-                                tmax_new.y = delta.y * (1. - fract(lpos_new.y));
-                            }
-                            else {
-                                lpos_new.y = f32(VOXEL_DIM) - f32(VOXEL_DIM) * iry;
-                                ipos_new.y = i32(floor(lpos_new.y));
-                                tmax_new.y = delta.y * fract(lpos_new.y);
-                            }
-                        }
-                    }
-                    else {
-                        if (tmax.z < tmax.y) {
-                            // zyx
-                            let len = tmax.z;
-                            
-                            let irx = 1. - (tmax.x - len) / delta.x;
-                            let iry = 1. - (tmax.y - len) / delta.y;
-
-                            if (sign(dir.z) > 0) {
-                                lpos_new.z = 0.;
-                                ipos_new.z = 0;
-                                tmax_new.z = delta.z;
-                            }
-                            else {
-                                lpos_new.z = f32(VOXEL_DIM);
-                                ipos_new.z = VOXEL_DIM - 1;
-                                tmax_new.z = delta.z;
-                            }
-
-                            if (sign(dir.x) > 0) {
-                                lpos_new.x = f32(VOXEL_DIM) * irx;
-                                ipos_new.x = i32(floor(lpos_new.x));
-                                tmax_new.x = delta.x * (1. - fract(lpos_new.x));
-                            }
-                            else {
-                                lpos_new.x = f32(VOXEL_DIM) - f32(VOXEL_DIM) * irx;
-                                ipos_new.x = i32(floor(lpos_new.x));
-                                tmax_new.x = delta.x * fract(lpos_new.x);
-                            }
-
-                            if (sign(dir.y) > 0) {
-                                lpos_new.y = f32(VOXEL_DIM) * iry;
-                                ipos_new.y = i32(floor(lpos_new.y));
-                                tmax_new.y = delta.y * (1. - fract(lpos_new.y));
-                            }
-                            else {
-                                lpos_new.y = f32(VOXEL_DIM) - f32(VOXEL_DIM) * iry;
-                                ipos_new.y = i32(floor(lpos_new.y));
-                                tmax_new.y = delta.y * fract(lpos_new.y);
-                            }
-                        }
-                        else {
-                            // yzx
-                            let len = tmax.y;
-                            
-                            let irx = 1. - (tmax.x - len) / delta.x;
-                            let irz = 1. - (tmax.z - len) / delta.z;
-
-                            if (sign(dir.y) > 0) {
-                                lpos_new.y = 0.;
-                                ipos_new.y = 0;
-                                tmax_new.y = delta.y;
-                            }
-                            else {
-                                lpos_new.y = f32(VOXEL_DIM);
-                                ipos_new.y = VOXEL_DIM - 1;
-                                tmax_new.y = delta.y;
-                            }
-
-                            if (sign(dir.x) > 0) {
-                                lpos_new.x = f32(VOXEL_DIM) * irx;
-                                ipos_new.x = i32(floor(lpos_new.x));
-                                tmax_new.x = delta.x * (1. - fract(lpos_new.x));
-                            }
-                            else {
-                                lpos_new.x = f32(VOXEL_DIM) - f32(VOXEL_DIM) * irx;
-                                ipos_new.x = i32(floor(lpos_new.x));
-                                tmax_new.x = delta.x * fract(lpos_new.x);
-                            }
-
-                            if (sign(dir.z) > 0) {
-                                lpos_new.z = f32(VOXEL_DIM) * irz;
-                                ipos_new.z = i32(floor(lpos_new.z));
-                                tmax_new.z = delta.z * (1. - fract(lpos_new.z));
-                            }
-                            else {
-                                lpos_new.z = f32(VOXEL_DIM) - f32(VOXEL_DIM) * irz;
-                                ipos_new.z = i32(floor(lpos_new.z));
-                                tmax_new.z = delta.z * fract(lpos_new.z);
-                            }
-                        }
-                    }
-                    tmax_prev_new = tmax_new - vec3f(mask) * delta;
-                }
-                else {
-                    // Apply offset and scale as if `voxel_size = 1.f`
-                    lpos_new = (lpos - vec3f(ipos)) * f32(VOXEL_DIM);
-
-                    ipos_new = vec3<i32>(floor(lpos_new));
-                    tmax_new = (sign(dir) * (vec3<f32>(ipos_new) - lpos_new) + (sign(dir) * 0.5) + 0.5) * delta;
-                }
+                lpos_new = sign(dir) * lpos_new_t + lpos_const;
+                ipos_new = vec3i(floor(lpos_new));
                 
-                //let local_pos = frames[depth].local_pos;
-                //let distance = min(tmax.x, min(tmax.y, tmax.z));
-                //
-                //// TODO try remove bias
-                //let current_local_pos = local_pos + dir * (distance + BIAS);
-                //let child_local_pos = (current_local_pos - vec3f(ipos)) * vec3f(VOXEL_DIM);
+                lpos_new *= vec3f(!lmask);
+                ipos_new *= vec3i(!lmask);
 
-                //depth += 1;
-
-                //frames[depth].index = voxel_nodes[index].indices[pos_to_idx(ipos)];
-                //frames[depth].local_pos = child_local_pos;
-                //frames[depth].ipos = vec3<i32>(floor(frames[depth].local_pos));
-                //frames[depth].tmax = (sign(dir) * (vec3<f32>(frames[depth].ipos) - frames[depth].local_pos) + (sign(dir) * 0.5) + 0.5) * delta;
-                //frames[depth].tmax_prev = vec3f();
-
-                //let nipos = frames[depth].ipos;
-                //let nindex = frames[depth].index;
-                //let nlocal_pos = frames[depth].local_pos;
-                //let ntmax = frames[depth].tmax;
-
-                // if (depth == 1) {
-                //      let color = vec3f(lpos_new / f32(VOXEL_DIM));
-                //      return RayMarchResult(vec3f(), color, 0f);
-                // }
-
-                depth += 1;
-
-                frames[depth].index = nodes[index].indices[pos_to_idx(ipos)];
-                frames[depth].local_pos = lpos_new;
-                frames[depth].ipos = ipos_new;
-                frames[depth].tmax = tmax_new;
-                frames[depth].tmax_prev = tmax_prev_new;
-                
-                // if (nlocal_pos.x >= 0 && depth == 1) {
-                //     let m = voxel_nodes[nindex].mask[1];
-                //     let color = vec3f(m);
-                //     return RayMarchResult(vec3f(), color, 0f);
-                // }
-
-                continue;
+                lpos_new += vec3f(lmask) * lpos_const;
+                ipos_new += vec3i(lmask) * ipos_const;
             }
+
+            tmax_prev_new = tmax_new - vec3f(mask) * delta;
+            
+
+            depth += 1;
+
+            frames[depth].index = nodes[index].indices[pos_to_idx(ipos)];
+            frames[depth].local_pos = lpos_new;
+            frames[depth].ipos = ipos_new;
+            frames[depth].tmax = tmax_new;
+            frames[depth].tmax_prev = tmax_prev_new;
+            
+            // if (nlocal_pos.x >= 0 && depth == 1) {
+            //     let m = voxel_nodes[nindex].mask[1];
+            //     let color = vec3f(m);
+            //     return RayMarchResult(vec3f(), color, 0f);
+            // }
+
+            continue;
         }
         
         
