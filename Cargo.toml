@@ -6,6 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+bevy_mod_debugdump = "0.10.0"
 color-backtrace = "0.6.1"
 dot_vox = "5.1.1"
 
@@ -13,3 +14,6 @@ dot_vox = "5.1.1"
 git = "https://github.com/bevyengine/bevy"
 rev = "d9d305dab5b3b7a12a634ea7adb5c5a4c6406ec1"
 features = ["file_watcher"]
+
+[patch.crates-io]
+bevy_mod_debugdump = { path = "../../src/bevy_mod_debugdump" }

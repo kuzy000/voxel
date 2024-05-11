@@ -3,10 +3,14 @@
 
 use bevy::{
     core_pipeline::{
+        core_3d::graph::{Core3d, Node3d},
         fxaa::Fxaa,
         prepass::{DeferredPrepass, DepthPrepass, MotionVectorPrepass, NormalPrepass},
     },
-    diagnostic::{EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin, SystemInformationDiagnosticsPlugin},
+    diagnostic::{
+        EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin,
+        SystemInformationDiagnosticsPlugin,
+    },
     ecs::system::{lifetimeless::SRes, SystemParamItem},
     pbr::{DefaultOpaqueRendererMethod, DirectionalLightShadowMap},
     prelude::*,
@@ -15,26 +19,26 @@ use bevy::{
         render_asset::{
             PrepareAssetError, RenderAsset, RenderAssetPlugin, RenderAssetUsages, RenderAssets,
         },
-        render_graph::{self, RenderLabel},
+        render_graph::{self, RenderGraph, RenderGraphApp, RenderLabel, ViewNodeRunner},
         render_resource::{
             binding_types::{storage_buffer_read_only, texture_storage_2d, uniform_buffer},
             *,
         },
         renderer::{RenderContext, RenderDevice, RenderQueue},
-        texture::ImageSampler, RenderApp,
+        texture::ImageSampler,
+        Render, RenderApp, RenderSet,
     },
     window::WindowPlugin,
 };
+use std::{borrow::Cow, fs};
+
 use camera::*;
 use import::*;
-use material::*;
 use render::*;
-use std::borrow::Cow;
 use voxel_tree::*;
 
 mod camera;
 mod import;
-mod material;
 mod math;
 mod render;
 mod ui;
@@ -42,13 +46,11 @@ mod voxel_tree;
 
 fn main() {
     color_backtrace::install();
-
-    App::new()
-        .insert_resource(ClearColor(Color::BLACK))
+    let mut app = App::new();
+    app.insert_resource(ClearColor(Color::BLACK))
         .insert_resource(Msaa::Off)
         .insert_resource(DefaultOpaqueRendererMethod::deferred())
         .insert_resource(DirectionalLightShadowMap { size: 4096 })
-        .init_resource::<GpuVoxelTree>()
         .add_plugins((
             DefaultPlugins.set(WindowPlugin {
                 primary_window: Some(Window {
@@ -58,105 +60,33 @@ fn main() {
                 }),
                 ..default()
             }),
-            MaterialPlugin::<VoxelTreeMaterial> {
-                prepass_enabled: true,
-                ..default()
-            },
             VoxelTracerPlugin,
             ui::GameUiPlugin,
         ))
         .add_systems(Startup, setup)
-        .add_systems(Update, update_game_camera)
-        .run();
-}
+        .add_systems(Update, update_game_camera);
 
-fn _setup_voxel_tracer(
-    mut commands: Commands,
-    mut images: ResMut<Assets<Image>>,
-    mut voxel_trees: ResMut<Assets<VoxelTree>>,
-    asset_server: Res<AssetServer>,
-) {
-    let mut image = Image::new_fill(
-        Extent3d {
-            width: SCREEN_SIZE.0,
-            height: SCREEN_SIZE.1,
+    let render_graph = bevy_mod_debugdump::render_graph_dot(&app, &default());
+    fs::write("render_graph.graph", render_graph);
 
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        &[0, 0, 0, 255],
-        TextureFormat::Rgba8Unorm,
-        RenderAssetUsages::RENDER_WORLD,
-    );
-    image.texture_descriptor.usage =
-        TextureUsages::COPY_DST | TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING;
-    image.sampler = ImageSampler::nearest();
+    let render_schedule =
+        bevy_mod_debugdump::schedule_graph_dot(app.sub_app_mut(RenderApp), Render, &default());
+    fs::write("render_schedule.graph", render_schedule);
 
-    let image = images.add(image);
-
-    commands.spawn(SpriteBundle {
-        sprite: Sprite {
-            custom_size: Some(Vec2::new(SCREEN_SIZE.0 as f32, SCREEN_SIZE.1 as f32)),
-            ..default()
-        },
-        texture: image.clone(),
-        ..default()
-    });
-
-    commands.spawn((
-        GameCamera,
-        DepthPrepass,
-        NormalPrepass,
-        MotionVectorPrepass,
-        DeferredPrepass,
-        Fxaa::default(),
-        Camera3dBundle {
-            transform: Transform::from_xyz(-2.5, 4.5, 9.0).looking_at(Vec3::ZERO, Vec3::Y),
-            ..default()
-        },
-        EnvironmentMapLight {
-            diffuse_map: asset_server.load("environment_maps/pisa_diffuse_rgb9e5_zstd.ktx2"),
-            specular_map: asset_server.load("environment_maps/pisa_specular_rgb9e5_zstd.ktx2"),
-            intensity: 250.0,
-        },
-    ));
-
-    // commands.spawn(GameCameraBundle {
-    //     transform: Transform::from_xyz(-10.0, -5.0, -5.0).looking_at(Vec3::ZERO, Vec3::Y),
-    //     ..Default::default()
-    // });
-
-    const DEPTH: u8 = 6;
-
-    let mut voxel_tree = VoxelTree::new(DEPTH);
-
-    // let model_path = "assets/Church_Of_St_Sophia.vox";
-    let model_path = "assets/monu2.vox";
-
-    let vox_model = dot_vox::load(model_path).expect("Failed to load");
-    place_vox(&mut voxel_tree, &vox_model);
-
-    let voxel_tree = voxel_trees.add(voxel_tree);
-
-    commands.insert_resource(VoxelTracer {
-        texture: image,
-        voxel_tree: voxel_tree,
-    });
+    app.run();
 }
 
 fn setup(
     mut commands: Commands,
-    //mut images: ResMut<Assets<Image>>,
-    //mut voxel_trees: ResMut<Assets<VoxelTree>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    // mut materials: ResMut<Assets<StandardMaterial>>,
-    mut vt_materials: ResMut<Assets<VoxelTreeMaterial>>,
-    mut gpu_voxel_tree: ResMut<GpuVoxelTree>,
     mut voxel_trees: ResMut<Assets<VoxelTree>>,
     asset_server: Res<AssetServer>,
-    render_device: ResMut<RenderDevice>,
-    render_queue: ResMut<RenderQueue>,
 ) {
+    // TODO: is there better way?
+    std::mem::forget(asset_server.load::<Shader>("shaders/common.wgsl"));
+    std::mem::forget(asset_server.load::<Shader>("shaders/sdf.wgsl"));
+    std::mem::forget(asset_server.load::<Shader>("shaders/voxel.wgsl"));
+
     const DEPTH: u8 = 6;
 
     let mut voxel_tree = VoxelTree::new(DEPTH);
@@ -167,38 +97,7 @@ fn setup(
     let vox_model = dot_vox::load(model_path).expect("Failed to load");
     place_vox(&mut voxel_tree, &vox_model);
 
-    {
-        gpu_voxel_tree.nodes.set(voxel_tree.nodes.clone());
-        gpu_voxel_tree
-            .nodes
-            .write_buffer(&render_device, &render_queue);
-
-        gpu_voxel_tree.leafs.set(voxel_tree.leafs.clone());
-        gpu_voxel_tree
-            .leafs
-            .write_buffer(&render_device, &render_queue);
-    }
-
-    voxel_trees.add(voxel_tree);
-
-    let size = 4f32.powf(6.0f32);
-
-    commands.spawn(MaterialMeshBundle::<VoxelTreeMaterial> {
-        mesh: meshes.add(Cuboid::new(size, size, size)),
-        material: vt_materials.add(VoxelTreeMaterial {
-            base: StandardMaterial {
-                cull_mode: Some(Face::Front),
-                opaque_render_method: bevy::pbr::OpaqueRendererMethod::Deferred,
-                ..default()
-            },
-            extension: VoxelTreeMaterialExtension {
-                voxel_nodes: gpu_voxel_tree.nodes.buffer().unwrap().clone(),
-                voxel_leafs: gpu_voxel_tree.leafs.buffer().unwrap().clone(),
-            },
-        }),
-        transform: Transform::from_translation(Vec3::splat(size * 0.5)),
-        ..default()
-    });
+    std::mem::forget(voxel_trees.add(voxel_tree));
 
     // gltf
     commands.spawn(SceneBundle {
@@ -234,7 +133,7 @@ fn setup(
         DeferredPrepass,
         Fxaa::default(),
         Camera3dBundle {
-            transform: Transform::from_xyz(-10., -10., -10.0).looking_at(Vec3::ZERO, Vec3::Y),
+            transform: Transform::from_xyz(-5., -5., -5.).looking_at(Vec3::ZERO, Vec3::Y),
             ..default()
         },
         EnvironmentMapLight {
@@ -257,22 +156,34 @@ impl Plugin for VoxelTracerPlugin {
         app.add_plugins(FrameTimeDiagnosticsPlugin::default());
         app.add_plugins(EntityCountDiagnosticsPlugin::default());
         app.add_plugins(SystemInformationDiagnosticsPlugin::default());
+        app.add_plugins(CameraDiagnosticsPlugin::default());
         app.init_asset::<VoxelTree>();
         let render_app = app.sub_app_mut(RenderApp);
 
-        // render_app.add_systems(
-        //     Render,
-        //     //prepare_voxel_tracer_bind_groups.in_set(RenderSet::PrepareBindGroups),
-        //     prepare_voxel_tree_bind_groups.in_set(RenderSet::PrepareBindGroups),
-        // );
+        render_app.add_systems(
+            Render,
+            prepare_voxel_view_bind_groups.in_set(RenderSet::PrepareBindGroups),
+        );
 
-        // let mut render_graph = render_app.world.resource_mut::<RenderGraph>();
-        // render_graph.add_node(VoxelTracerLabel, VoxelTracerRenderNode::default());
-        // render_graph.add_node_edge(VoxelTracerLabel, bevy::render::graph::CameraDriverLabel);
+        let mut render_graph = render_app.world_mut().resource_mut::<RenderGraph>();
+        render_app
+            .add_render_graph_node::<ViewNodeRunner<VoxelWorldPepassNode>>(
+                Core3d,
+                VoxelWorldPepassNodeLabel,
+            )
+            .add_render_graph_edges(
+                Core3d,
+                (
+                    Node3d::DeferredPrepass,
+                    VoxelWorldPepassNodeLabel,
+                    Node3d::CopyDeferredLightingId,
+                ),
+            );
     }
 
     fn finish(&self, app: &mut App) {
-        // let render_app = app.sub_app_mut(RenderApp);
-        // render_app.init_resource::<VoxelTracerPipelines>();
+        let render_app = app.sub_app_mut(RenderApp);
+        render_app.init_resource::<VoxelGpuScene>();
+        render_app.init_resource::<VoxelPipelines>();
     }
 }

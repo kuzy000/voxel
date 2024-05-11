@@ -1,4 +1,4 @@
-use bevy::{input::mouse::MouseMotion, prelude::*};
+use bevy::{diagnostic::{Diagnostic, DiagnosticPath, Diagnostics, RegisterDiagnostic}, ecs::entity::Entities, input::mouse::MouseMotion, prelude::*};
 
 #[derive(Component)]
 pub struct GameCamera;
@@ -68,4 +68,36 @@ pub fn update_game_camera(
     let pitch = pitch - y * factor;
 
     transform.rotation = Quat::from_rotation_y(yaw) * Quat::from_rotation_x(pitch);
+}
+
+#[derive(Default)]
+pub struct CameraDiagnosticsPlugin;
+
+impl Plugin for CameraDiagnosticsPlugin {
+    fn build(&self, app: &mut App) {
+        app.register_diagnostic(Diagnostic::new(Self::POS_X))
+            .add_systems(Update, Self::diagnostic_system);
+        app.register_diagnostic(Diagnostic::new(Self::POS_Y))
+            .add_systems(Update, Self::diagnostic_system);
+        app.register_diagnostic(Diagnostic::new(Self::POS_Z))
+            .add_systems(Update, Self::diagnostic_system);
+    }
+}
+
+impl CameraDiagnosticsPlugin {
+    pub const POS_X: DiagnosticPath = DiagnosticPath::const_new("camera_pos_x");
+    pub const POS_Y: DiagnosticPath = DiagnosticPath::const_new("camera_pos_y");
+    pub const POS_Z: DiagnosticPath = DiagnosticPath::const_new("camera_pos_z");
+
+    pub fn diagnostic_system(
+        mut diagnostics: Diagnostics, 
+        q: Query<&Transform, With<GameCamera>>) {
+
+        let transform = q.single();
+        let p = transform.translation;
+
+        diagnostics.add_measurement(&Self::POS_X, || p.x as f64);
+        diagnostics.add_measurement(&Self::POS_Y, || p.y as f64);
+        diagnostics.add_measurement(&Self::POS_Z, || p.z as f64);
+    }
 }

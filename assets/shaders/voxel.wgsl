@@ -1,40 +1,13 @@
-#import bevy_pbr::{
-    pbr_functions::alpha_discard,
-    pbr_fragment::pbr_input_from_standard_material,
-    mesh_view_bindings::view,
-    view_transformations::position_world_to_view,
-    view_transformations::position_clip_to_view,
-    view_transformations::position_ndc_to_view,
-    view_transformations::view_z_to_depth_ndc,
-}
+#define_import_path voxel_tracer::voxel
 
-#ifdef PREPASS_PIPELINE
-#import bevy_pbr::{
-    prepass_io::{VertexOutput, FragmentOutput},
-    pbr_deferred_functions::deferred_output,
-}
-#else
-#import bevy_pbr::{
-    forward_io::{VertexOutput, FragmentOutput},
-    pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing},
-    pbr_types::STANDARD_MATERIAL_FLAGS_UNLIT_BIT,
-}
-#endif
+#import voxel_tracer::common::{RayMarchResult, DST_MAX}
 
-#import bevy_render::{
-    view::View,
-}
-
-#ifdef MESHLET_MESH_MATERIAL_PASS
-#import bevy_pbr::meshlet_visibility_buffer_resolve::resolve_vertex_output
-#endif
+const MAX_STEPS: i32 = 256;
 
 const VOXEL_SIZE: f32 = 1.0f;
 const VOXEL_DIM: i32 = 4;
 const VOXEL_COUNT: i32 = VOXEL_DIM * VOXEL_DIM * VOXEL_DIM;
 const VOXEL_TREE_DEPTH: i32 = 6;
-
-const DST_MAX = 1e9f;
 
 struct Voxel {
     color: vec3f,
@@ -47,95 +20,12 @@ struct VoxelLeaf {
 
 struct VoxelNode {
     mask: array<u32, 2>,
-    // Indices to either `voxel_nodes` or voxel_leafs` depending on the current depth
+    // Indices to either `nodes` or `leafs` depending on the current depth
     indices: array<u32, VOXEL_COUNT>,
 }
 
-
-@group(2) @binding(100) var<storage, read> voxel_nodes: array<VoxelNode>;
-@group(2) @binding(101) var<storage, read> voxel_leafs: array<VoxelLeaf>;
-
-
-const MAX_STEPS: i32 = 256;
-
-struct RayMarchResult {
-    normal: vec3<f32>,
-    color: vec3<f32>,
-    distance: f32,
-}
-
-
-// https://iquilezles.org/articles/distfunctions/
-fn sdf_plane(p: vec3<f32>, n: vec3<f32>, h: f32) -> f32 {
-    return abs(dot(p, n) + h);
-}
-
-fn sdf_sphere(p: vec3<f32>, r: f32) -> f32 {
-    return length(p) - r;
-}
-
-fn sdf_box(p: vec3<f32>, b: vec3<f32>) -> f32 {
-    let q = abs(p) - b;
-    return length(max(q, vec3<f32>(0.0))) + min(max(q.x,max(q.y,q.z)),0.0);
-}
-
-fn sdf_round_box(p: vec3<f32>, b: vec3<f32>, r: f32) -> f32 {
-    let q = abs(p) - b + r;
-    return length(max(q, vec3<f32>(0.0))) + min(max(q.x,max(q.y,q.z)),0.0) - r;
-}
-
-fn sdf_world(p: vec3<f32>) -> f32 {
-    let size = 1.f;
-
-    var res: f32 = DST_MAX;
-
-    res = min(res, sdf_sphere(p, 0.5));
-    res = min(res, sdf_box(p - vec3(3., 0., 0.), vec3f(1.)));
-    res = min(res, sdf_box(p - vec3(0., 3., 0.), vec3f(1.)));
-    res = min(res, sdf_box(p - vec3(0., 0., 3.), vec3f(1.)));
-    
-
-    return res;
-}
-
-fn normal_world(p: vec3<f32>) -> vec3<f32> {
-    let step = vec2(0.001f, 0.f);
-    
-    let x = sdf_world(p + step.xyy) - sdf_world(p - step.xyy);
-    let y = sdf_world(p + step.yxy) - sdf_world(p - step.yxy);
-    let z = sdf_world(p + step.yyx) - sdf_world(p - step.yyx);
-    
-    return normalize(vec3(x, y, z));
-}
-
-fn ray_march_sdf(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
-    let step_size = .01f;
-    let steps = 64;
-    let min_dst = 0.01f;
-    let max_dst = 1000.f;
-
-    var ray_len = 0.f;
-
-    for (var i = 0; i < steps; i++) {
-        let p = pos + dir * ray_len;
-        let dst = sdf_world(p);
-        
-        if (dst < min_dst) {
-            let normal = normal_world(p);
-            let color = normal * 0.5 + 0.5;
-            return RayMarchResult(normal, color, ray_len);
-        }
-        
-        if (dst > max_dst) {
-            break;
-        }
-        
-        ray_len += dst;
-    }
-
-    return RayMarchResult(vec3<f32>(), vec3<f32>(), DST_MAX);
-}
-
+@group(0) @binding(1) var<storage, read> nodes: array<VoxelNode>;
+@group(0) @binding(2) var<storage, read> leafs: array<VoxelLeaf>;
 
 fn pos_to_idx(ipos: vec3<i32>) -> u32 {
     return u32(ipos.x * 4 * 4 + ipos.y * 4 + ipos.z);
@@ -147,7 +37,7 @@ fn get_voxel(ipos: vec3<i32>) -> bool {
     if (ipos.z < 0 || ipos.z >= 4) { return false; }
 
     let i = pos_to_idx(ipos);
-    let leaf = voxel_leafs[0];
+    let leaf = leafs[0];
     
     if (i < 32) {
         return (leaf.mask[0] & (1u << (i - 0))) > 0;
@@ -204,7 +94,7 @@ fn get_voxel_leaf(index: u32, ipos: vec3<i32>) -> bool {
 //    return s;
 //    
     let i = pos_to_idx(ipos);
-    let leaf = voxel_leafs[index];
+    let leaf = leafs[index];
     
     if (i < 32) {
         return (leaf.mask[0] & (1u << (i - 0))) > 0;
@@ -221,7 +111,7 @@ fn get_voxel_nodes(index: u32, ipos: vec3<i32>) -> bool {
     if (ipos.z < 0 || ipos.z >= 4) { return false; }
     
     let i = pos_to_idx(ipos);
-    let node = voxel_nodes[index];
+    let node = nodes[index];
     
     if (i < 32) {
         return (node.mask[0] & (1u << (i - 0))) > 0;
@@ -295,7 +185,7 @@ struct RayMarchFrame {
     tmax_prev: vec3<f32>,
 }
 
-fn ray_march_voxel(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
+fn trace(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
     var frames: array<RayMarchFrame, VOXEL_TREE_DEPTH>;
     
     var inter_t = 0.f;
@@ -378,7 +268,7 @@ fn ray_march_voxel(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
 
             let color = vec3f(local_pos);
             if (get_voxel_leaf(index, ipos)) {
-                let voxel = voxel_leafs[index].voxels[pos_to_idx(ipos)];
+                let voxel = leafs[index].voxels[pos_to_idx(ipos)];
 
                 let normal = -normalize(vec3<f32>(mask) * vec3<f32>(istep));
                 let color = voxel.color; //normal * .5 + .5;
@@ -609,7 +499,7 @@ fn ray_march_voxel(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
 
                 depth += 1;
 
-                frames[depth].index = voxel_nodes[index].indices[pos_to_idx(ipos)];
+                frames[depth].index = nodes[index].indices[pos_to_idx(ipos)];
                 frames[depth].local_pos = lpos_new;
                 frames[depth].ipos = ipos_new;
                 frames[depth].tmax = tmax_new;
@@ -636,59 +526,3 @@ fn ray_march_voxel(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
     
     return RayMarchResult(vec3<f32>(), vec3<f32>(), DST_MAX);
 }
-
-
-struct FragmentOutputWithDepth {
-    @location(0) normal: vec4<f32>,
-    @location(1) motion_vector: vec2<f32>,
-    @location(2) deferred: vec4<u32>,
-    @location(3) deferred_lighting_pass_id: u32,
-    @builtin(frag_depth) frag_depth: f32,
-}
-
-
-@fragment
-fn fragment(
-    in: VertexOutput,
-    @builtin(front_facing) is_front: bool,
-) -> FragmentOutputWithDepth {
-
-    // generate a PbrInput struct from the StandardMaterial bindings
-    var pbr_input = pbr_input_from_standard_material(in, is_front);
-    
-    // alpha discard
-    pbr_input.material.base_color = alpha_discard(pbr_input.material, pbr_input.material.base_color);
-
-
-    let pos4 = view.view * vec4f(0.f, 0.f, 0.f, 1.f);
-    let pos = pos4.xyz / pos4.w;
-    let dir = normalize(-pbr_input.V);
-
-    let res_vox = ray_march_voxel(pos, dir);
-    let res_sdf = ray_march_sdf(pos, dir);
-    
-    var res: RayMarchResult;
-    if (res_vox.distance < res_sdf.distance) {
-        res = res_vox;
-    }
-    else {
-        res = res_sdf;
-    }
-
-    pbr_input.material.base_color = vec4f(res.color, 1.);
-    pbr_input.N = res.normal;
-
-    // TODO take into account distance from the camera to the near clipping plane
-    let depth = view_z_to_depth_ndc(-res.distance);
-
-    var out = deferred_output(in, pbr_input);
-    var newOut: FragmentOutputWithDepth;
-    newOut.frag_depth = depth;
-    newOut.deferred = out.deferred;
-    newOut.deferred_lighting_pass_id = out.deferred_lighting_pass_id;
-    newOut.normal = vec4f(res.normal, 1.);
-    newOut.motion_vector = out.motion_vector;
-
-    return newOut;
-}
-

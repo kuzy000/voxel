@@ -1,4 +1,4 @@
-use bevy::{prelude::*, render::render_resource::ShaderType};
+use bevy::{prelude::*, render::{render_asset::RenderAsset, render_resource::ShaderType}};
 
 pub const SIZE: (u32, u32, u32) = (4, 4, 4);
 pub const VOXEL_COUNT: usize = 4 * 4 * 4;
@@ -35,7 +35,6 @@ pub struct VoxelNode {
 }
 
 impl VoxelNode {
-    #[allow(dead_code)]
     pub fn debug_print(&self, self_idx: usize, depth: usize, tree: &VoxelTree) {
         let mask: u64 = ((self.mask[1] as u64) << 32) | (self.mask[0] as u64);
 
@@ -93,7 +92,6 @@ impl VoxelTree {
         }
     }
 
-    #[allow(dead_code)]
     pub fn debug_print(&self) {
         error!("Num of nodes: {}", self.nodes.len());
 
@@ -194,7 +192,6 @@ pub fn set_mask(mask: &mut [u32; 2], idx: u32) {
     mask[1] = (mask64 >> 32) as u32;
 }
 
-#[allow(dead_code)]
 pub fn gen_voxel_leaf(offset: IVec3, f: &impl Fn(IVec3) -> bool) -> Option<VoxelLeaf> {
     let mut mask: u64 = 0;
     for x in 0..VOXEL_DIM {
@@ -225,7 +222,6 @@ pub fn gen_voxel_leaf(offset: IVec3, f: &impl Fn(IVec3) -> bool) -> Option<Voxel
     }
 }
 
-#[allow(dead_code)]
 pub fn gen_voxel_node(
     tree: &mut VoxelTree,
     offset: IVec3,
@@ -278,7 +274,6 @@ pub fn gen_voxel_node(
     }
 }
 
-#[allow(dead_code)]
 pub fn gen_voxel_tree(depth: u8, f: &impl Fn(IVec3) -> bool) -> VoxelTree {
     let mut res = VoxelTree::default();
     gen_voxel_node(&mut res, IVec3::ZERO, 0, depth - 1, f);
@@ -286,7 +281,6 @@ pub fn gen_voxel_tree(depth: u8, f: &impl Fn(IVec3) -> bool) -> VoxelTree {
     res
 }
 
-#[allow(dead_code)]
 pub fn gen_test_scene(voxel_tree: &mut VoxelTree, size: i32, color: Vec3) {
     let voxel = Voxel { color };
 
