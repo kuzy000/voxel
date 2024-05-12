@@ -5,21 +5,21 @@
 const MAX_STEPS: i32 = 256;
 
 const VOXEL_SIZE: f32 = 1.0f;
-const VOXEL_DIM: i32 = 4;
+const VOXEL_DIM: i32 = #{VOXEL_DIM};
 const VOXEL_COUNT: i32 = VOXEL_DIM * VOXEL_DIM * VOXEL_DIM;
-const VOXEL_TREE_DEPTH: i32 = 6;
+const VOXEL_TREE_DEPTH: i32 = #{VOXEL_TREE_DEPTH};
 
 struct Voxel {
     color: vec3f,
 }
 
 struct VoxelLeaf {
-    mask: array<u32, 2>,
+    mask: array<u32, #{VOXEL_MASK_LEN}>,
     voxels: array<Voxel, VOXEL_COUNT>,
 }
 
 struct VoxelNode {
-    mask: array<u32, 2>,
+    mask: array<u32, #{VOXEL_MASK_LEN}>,
     // Indices to either `nodes` or `leafs` depending on the current depth
     indices: array<u32, VOXEL_COUNT>,
 }
@@ -35,24 +35,42 @@ fn get_voxel_leaf(index: u32, ipos: vec3<i32>) -> bool {
     let i = pos_to_idx(ipos);
     let leaf = leafs[index];
     
-    if (i < 32) {
-        return (leaf.mask[0] & (1u << (i - 0))) > 0;
-    }
-    else {
-        return (leaf.mask[1] & (1u << (i - 32))) > 0;
-    }
+    let ti = i >> 5;
+    let oi = ti * 32;
+    
+    if (ti == 0) { return (leaf.mask[0] & (1u << (i - oi))) > 0; }
+    if (ti == 1) { return (leaf.mask[1] & (1u << (i - oi))) > 0; }
+#ifdef 0
+    if (ti == 2) { return (leaf.mask[2] & (1u << (i - oi))) > 0; }
+    if (ti == 3) { return (leaf.mask[3] & (1u << (i - oi))) > 0; }
+    if (ti == 4) { return (leaf.mask[4] & (1u << (i - oi))) > 0; }
+    if (ti == 5) { return (leaf.mask[5] & (1u << (i - oi))) > 0; }
+    if (ti == 6) { return (leaf.mask[6] & (1u << (i - oi))) > 0; }
+    if (ti == 7) { return (leaf.mask[7] & (1u << (i - oi))) > 0; }
+#endif
+    
+    return false;
 }
 
 fn get_voxel_nodes(index: u32, ipos: vec3<i32>) -> bool {
     let i = pos_to_idx(ipos);
     let node = nodes[index];
     
-    if (i < 32) {
-        return (node.mask[0] & (1u << (i - 0))) > 0;
-    }
-    else {
-        return (node.mask[1] & (1u << (i - 32))) > 0;
-    }
+    let ti = i >> 5;
+    let oi = ti * 32;
+    
+    if (ti == 0) { return (node.mask[0] & (1u << (i - oi))) > 0; }
+    if (ti == 1) { return (node.mask[1] & (1u << (i - oi))) > 0; }
+#ifdef 0
+    if (ti == 2) { return (node.mask[2] & (1u << (i - oi))) > 0; }
+    if (ti == 3) { return (node.mask[3] & (1u << (i - oi))) > 0; }
+    if (ti == 4) { return (node.mask[4] & (1u << (i - oi))) > 0; }
+    if (ti == 5) { return (node.mask[5] & (1u << (i - oi))) > 0; }
+    if (ti == 6) { return (node.mask[6] & (1u << (i - oi))) > 0; }
+    if (ti == 7) { return (node.mask[7] & (1u << (i - oi))) > 0; }
+#endif
+    
+    return false;
 }
 
 struct Intersection {

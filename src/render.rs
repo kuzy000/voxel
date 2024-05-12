@@ -7,10 +7,7 @@ use bevy::{
         deferred::{DEFERRED_LIGHTING_PASS_ID_FORMAT, DEFERRED_PREPASS_FORMAT},
         fullscreen_vertex_shader::fullscreen_shader_vertex_state,
         prepass::{ViewPrepassTextures, MOTION_VECTOR_PREPASS_FORMAT, NORMAL_PREPASS_FORMAT},
-    },
-    ecs::{query::QueryItem, system::lifetimeless::SResMut},
-    prelude::*,
-    render::{
+    }, diagnostic::DiagnosticsStore, ecs::{query::QueryItem, system::lifetimeless::SResMut}, prelude::*, render::{
         camera::ExtractedCamera,
         prelude::*,
         render_graph::{NodeRunError, RenderGraphContext, ViewNode},
@@ -18,8 +15,7 @@ use bevy::{
         render_resource::binding_types::storage_buffer_read_only_sized,
         texture::GpuImage,
         view::{ViewDepthTexture, ViewUniform, ViewUniformOffset, ViewUniforms},
-    },
-    utils::info,
+    }, utils::info
 };
 
 use crate::*;
@@ -115,7 +111,20 @@ impl FromWorld for VoxelPipelines {
                 multisample: default(),
                 fragment: Some(FragmentState {
                     shader: shader.clone(),
-                    shader_defs: vec![],
+                    shader_defs: vec![
+                        ShaderDefVal::Int(
+                            "VOXEL_DIM".into(), 
+                            VOXEL_DIM as i32,
+                        ),
+                        ShaderDefVal::Int(
+                            "VOXEL_TREE_DEPTH".into(), 
+                            VOXEL_TREE_DEPTH as i32,
+                        ),
+                        ShaderDefVal::Int(
+                            "VOXEL_MASK_LEN".into(), 
+                            VOXEL_MASK_LEN as i32,
+                        ),
+                    ],
                     entry_point: "fragment".into(),
                     targets: vec![
                         Some(ColorTargetState {

@@ -1,11 +1,15 @@
 use bevy::{prelude::*, render::{render_asset::RenderAsset, render_resource::ShaderType}};
 
-pub const SIZE: (u32, u32, u32) = (4, 4, 4);
-pub const VOXEL_COUNT: usize = 4 * 4 * 4;
+
 pub const VOXEL_DIM: usize = 4;
+pub const VOXEL_TREE_DEPTH: usize = 6;
+pub const VOXEL_MASK_LEN: usize = 2;
+
+pub const VOXEL_COUNT: usize = VOXEL_DIM * VOXEL_DIM * VOXEL_DIM;
 
 pub fn pos_to_idx(ipos: IVec3) -> i32 {
-    ipos.x * 4 * 4 + ipos.y * 4 + ipos.z
+    let dim = VOXEL_DIM as i32;
+    ipos.x * dim * dim + ipos.y * dim + ipos.z
 }
 
 #[derive(Reflect, Clone, Copy, Default, ShaderType, Debug)]
@@ -15,14 +19,14 @@ pub struct Voxel {
 
 #[derive(Reflect, Clone, ShaderType, Debug)]
 pub struct VoxelLeaf {
-    pub mask: [u32; 2],
+    pub mask: [u32; VOXEL_MASK_LEN],
     pub voxels: [Voxel; VOXEL_COUNT],
 }
 
 impl Default for VoxelLeaf {
     fn default() -> Self {
         Self {
-            mask: [0; 2],
+            mask: [0; VOXEL_MASK_LEN],
             voxels: [Voxel { color: Vec3::ONE }; VOXEL_COUNT],
         }
     }
@@ -30,42 +34,42 @@ impl Default for VoxelLeaf {
 
 #[derive(Reflect, Clone, ShaderType, Debug)]
 pub struct VoxelNode {
-    pub mask: [u32; 2],
+    pub mask: [u32; VOXEL_MASK_LEN],
     pub indices: [u32; VOXEL_COUNT],
 }
 
 impl VoxelNode {
-    pub fn debug_print(&self, self_idx: usize, depth: usize, tree: &VoxelTree) {
-        let mask: u64 = ((self.mask[1] as u64) << 32) | (self.mask[0] as u64);
-
-        error!("{:indent$}Node: {}", "", self_idx, indent = depth * 2);
-        error!(
-            "{:indent$}Indices: {:?}",
-            "",
-            self.indices,
-            indent = (depth + 1) * 2
-        );
-        if depth == 1 {
-            return;
-        }
-
-        for i in 0..64 {
-            if mask & (1u64 << i) == 0 {
-                continue;
-            }
-            error!("{:indent$}Idx: {}", "", i, indent = (depth + 1) * 2);
-
-            let nidx = self.indices[i as usize] as usize;
-
-            tree.nodes[nidx].debug_print(nidx, depth + 1, tree);
-        }
-    }
+//    pub fn debug_print(&self, self_idx: usize, depth: usize, tree: &VoxelTree) {
+//        let mask: u64 = ((self.mask[1] as u64) << 32) | (self.mask[0] as u64);
+//
+//        error!("{:indent$}Node: {}", "", self_idx, indent = depth * 2);
+//        error!(
+//            "{:indent$}Indices: {:?}",
+//            "",
+//            self.indices,
+//            indent = (depth + 1) * 2
+//        );
+//        if depth == 1 {
+//            return;
+//        }
+//
+//        for i in 0..64 {
+//            if mask & (1u64 << i) == 0 {
+//                continue;
+//            }
+//            error!("{:indent$}Idx: {}", "", i, indent = (depth + 1) * 2);
+//
+//            let nidx = self.indices[i as usize] as usize;
+//
+//            tree.nodes[nidx].debug_print(nidx, depth + 1, tree);
+//        }
+//    }
 }
 
 impl Default for VoxelNode {
     fn default() -> Self {
         Self {
-            mask: [0; 2],
+            mask: [0; VOXEL_MASK_LEN],
             indices: [0; VOXEL_COUNT],
         }
     }
@@ -81,7 +85,7 @@ pub struct VoxelTree {
 impl VoxelTree {
     pub fn new(depth: u8) -> Self {
         let root = VoxelNode {
-            mask: [0u32, 0u32],
+            mask: [0; VOXEL_MASK_LEN],
             indices: [0u32; VOXEL_COUNT],
         };
 
@@ -92,27 +96,26 @@ impl VoxelTree {
         }
     }
 
-    pub fn debug_print(&self) {
-        error!("Num of nodes: {}", self.nodes.len());
-
-        self.nodes[0].debug_print(0, 0, self);
-    }
+//    pub fn debug_print(&self) {
+//        error!("Num of nodes: {}", self.nodes.len());
+//
+//        self.nodes[0].debug_print(0, 0, self);
+//    }
 
     pub fn set_or_create_node(&mut self, parent_idx: u32, pos: IVec3) -> u32 {
         let nodes_len = self.nodes.len();
         let parent = &mut self.nodes[parent_idx as usize];
         let idx = pos_to_idx(pos);
-        let mask: u64 = ((parent.mask[1] as u64) << 32) | (parent.mask[0] as u64);
 
-        if mask & (1u64 << idx) != 0 {
+        if get_mask(&parent.mask, idx) {
             parent.indices[idx as usize]
         } else {
             let res = nodes_len as u32;
             parent.indices[idx as usize] = res;
-            set_mask(&mut parent.mask, idx as u32);
+            set_mask(&mut parent.mask, idx);
 
             self.nodes.push(VoxelNode {
-                mask: [0, 0],
+                mask: [0; VOXEL_MASK_LEN],
                 indices: [0; VOXEL_COUNT],
             });
 
@@ -127,17 +130,16 @@ impl VoxelTree {
 
         let parent = &mut self.nodes[parent_idx as usize];
         let idx = pos_to_idx(pos);
-        let mask: u64 = ((parent.mask[1] as u64) << 32) | (parent.mask[0] as u64);
 
-        if mask & (1u64 << idx) != 0 {
+        if get_mask(&parent.mask, idx) {
             parent.indices[idx as usize]
         } else {
             let res = self.leafs.len() as u32;
             parent.indices[idx as usize] = res;
-            set_mask(&mut parent.mask, idx as u32);
+            set_mask(&mut parent.mask, idx);
 
             self.leafs.push(VoxelLeaf {
-                mask: [0, 0],
+                mask: [0; VOXEL_MASK_LEN],
                 voxels: [Voxel { color: Vec3::ONE }; VOXEL_COUNT],
             });
 
@@ -175,7 +177,7 @@ impl VoxelTree {
                 let leaf = &mut self.leafs[idx as usize];
                 let local_pos = pos % (VOXEL_DIM as i32);
                 let idx = pos_to_idx(local_pos);
-                set_mask(&mut leaf.mask, idx as u32);
+                set_mask(&mut leaf.mask, idx);
                 leaf.voxels[idx as usize] = voxel;
             } else {
                 parent_idx = self.set_or_create_node(parent_idx, local_pos);
@@ -184,16 +186,21 @@ impl VoxelTree {
     }
 }
 
-pub fn set_mask(mask: &mut [u32; 2], idx: u32) {
-    let mut mask64: u64 = ((mask[1] as u64) << 32) | (mask[0] as u64);
-    mask64 |= 1u64 << idx;
+pub fn set_mask(mask: &mut [u32; VOXEL_MASK_LEN], idx: i32) {
+    let a = idx >> 5;
+    let b = a * 32;
+    mask[a as usize] |= 1u32 << (idx - b);
+}
 
-    mask[0] = mask64 as u32;
-    mask[1] = (mask64 >> 32) as u32;
+pub fn get_mask(mask: &[u32; VOXEL_MASK_LEN], idx: i32) -> bool {
+    let a = idx >> 5;
+    let b = a * 32;
+    return (mask[a as usize] & 1u32 << (idx - b)) > 0
 }
 
 pub fn gen_voxel_leaf(offset: IVec3, f: &impl Fn(IVec3) -> bool) -> Option<VoxelLeaf> {
-    let mut mask: u64 = 0;
+    let mut mask = [0u32; VOXEL_MASK_LEN];
+    let mut add = false;
     for x in 0..VOXEL_DIM {
         for y in 0..VOXEL_DIM {
             for z in 0..VOXEL_DIM {
@@ -204,15 +211,16 @@ pub fn gen_voxel_leaf(offset: IVec3, f: &impl Fn(IVec3) -> bool) -> Option<Voxel
                 };
 
                 if f(offset + v) {
-                    mask |= 1u64 << pos_to_idx(v);
+                    set_mask(&mut mask, pos_to_idx(v));
+                    add = true;
                 }
             }
         }
     }
 
-    if mask != 0 {
+    if add {
         Some(VoxelLeaf {
-            mask: [mask as u32, (mask >> 32) as u32],
+            mask,
             voxels: [Voxel {
                 color: Vec3::splat(1.),
             }; VOXEL_COUNT],
@@ -232,7 +240,8 @@ pub fn gen_voxel_node(
     let idx_cur = tree.nodes.len();
     tree.nodes.push(Default::default());
 
-    let mut mask: u64 = 0;
+    let mut mask = [0u32; VOXEL_MASK_LEN];
+    let mut add = false;
     for x in 0..VOXEL_DIM {
         for y in 0..VOXEL_DIM {
             for z in 0..VOXEL_DIM {
@@ -248,22 +257,26 @@ pub fn gen_voxel_node(
                     if let Some(leaf) = gen_voxel_leaf(offset, f) {
                         tree.nodes[idx_cur].indices[index as usize] = tree.leafs.len() as u32;
                         tree.leafs.push(leaf);
+                        
+                        add = true;
 
-                        mask |= 1u64 << index
+                        set_mask(&mut mask, index);
                     }
                 } else {
                     if let Some(idx) = gen_voxel_node(tree, offset, depth + 1, leaf_depth, f) {
                         tree.nodes[idx_cur].indices[index as usize] = idx;
 
-                        mask |= 1u64 << index
+                        add = true;
+
+                        set_mask(&mut mask, index);
                     }
                 }
             }
         }
     }
 
-    if mask != 0 {
-        tree.nodes[idx_cur].mask = [mask as u32, (mask >> 32) as u32];
+    if add {
+        tree.nodes[idx_cur].mask = mask;
 
         return Some(idx_cur as u32);
     } else {
@@ -292,7 +305,7 @@ pub fn gen_test_scene(voxel_tree: &mut VoxelTree, size: i32, color: Vec3) {
 
     for x in 0..size {
         for y in 0..size {
-            voxel_tree.set_voxel(IVec3::new(x, y, size - 20), voxel);
+            voxel_tree.set_voxel(IVec3::new(x, y, size - 1), voxel);
         }
     }
 

@@ -25,8 +25,9 @@ use bevy::{
             *,
         },
         renderer::{RenderContext, RenderDevice, RenderQueue},
+        settings::{Backends, InstanceFlags, RenderCreation, WgpuSettings},
         texture::ImageSampler,
-        Render, RenderApp, RenderSet,
+        Render, RenderApp, RenderPlugin, RenderSet,
     },
     window::WindowPlugin,
 };
@@ -52,14 +53,22 @@ fn main() {
         .insert_resource(DefaultOpaqueRendererMethod::deferred())
         .insert_resource(DirectionalLightShadowMap { size: 4096 })
         .add_plugins((
-            DefaultPlugins.set(WindowPlugin {
-                primary_window: Some(Window {
-                    // uncomment for unthrottled FPS
-                    // present_mode: bevy::window::PresentMode::AutoNoVsync,
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        // uncomment for unthrottled FPS
+                        present_mode: bevy::window::PresentMode::AutoNoVsync,
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .set(RenderPlugin {
+                    render_creation: RenderCreation::Automatic(WgpuSettings {
+                        instance_flags: InstanceFlags::default().with_env() | InstanceFlags::DEBUG,
+                        ..default()
+                    }),
                     ..default()
                 }),
-                ..default()
-            }),
             VoxelTracerPlugin,
             ui::GameUiPlugin,
         ))
@@ -87,9 +96,9 @@ fn setup(
     std::mem::forget(asset_server.load::<Shader>("shaders/sdf.wgsl"));
     std::mem::forget(asset_server.load::<Shader>("shaders/voxel.wgsl"));
 
-    const DEPTH: u8 = 6;
 
-    let mut voxel_tree = VoxelTree::new(DEPTH);
+    let mut voxel_tree = VoxelTree::new(VOXEL_TREE_DEPTH as u8);
+    //gen_test_scene(&mut voxel_tree, 4i32.pow(DEPTH as u32), Vec3::new(1., 0.5, 1.));
 
     let model_path = "assets/Church_Of_St_Sophia.vox";
     // let model_path = "assets/monu2.vox";

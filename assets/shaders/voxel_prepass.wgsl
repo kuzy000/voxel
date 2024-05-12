@@ -3,6 +3,7 @@
 #import bevy_pbr::pbr_types::PbrInput 
 #import bevy_pbr::pbr_types::pbr_input_new
 #import bevy_pbr::pbr_types::STANDARD_MATERIAL_FLAGS_UNLIT_BIT
+#import bevy_pbr::pbr_types::STANDARD_MATERIAL_FLAGS_ALPHA_MODE_OPAQUE
 #import bevy_pbr::pbr_deferred_functions::deferred_gbuffer_from_pbr_input
 
 #import voxel_tracer::common::RayMarchResult
@@ -52,14 +53,6 @@ fn view_z_to_depth_ndc(view_z: f32) -> f32 {
 
 @fragment
 fn fragment(in: FullscreenVertexOutput) -> FragmentOutputWithDepth {
-    var pbr_input = pbr_input_new();
-    pbr_input.material.base_color = vec4f(1., 0., 0., 1.);
-    pbr_input.frag_coord = vec4(in.uv, 0.5, 1.);
-     
-     //var newOut: FragmentOutputWithDepth;
-     //newOut.deferred = deferred_gbuffer_from_pbr_input(pbr_input);
-     //newOut.frag_depth = 0.001;
-    
     var ndc = in.uv * 2. - 1.;
     ndc.y = -ndc.y;
     
@@ -88,6 +81,10 @@ fn fragment(in: FullscreenVertexOutput) -> FragmentOutputWithDepth {
         discard;
     }
 
+    var pbr_input = pbr_input_new();
+     
+    pbr_input.frag_coord = vec4(in.uv, 0.5, 1.);
+    // pbr_input.material.base_color = vec4f(res.normal * 0.5 + 0.5, 1.);
     pbr_input.material.base_color = vec4f(res.color, 1.);
     pbr_input.material.flags |= STANDARD_MATERIAL_FLAGS_UNLIT_BIT;
     //pbr_input.N = res.position;
