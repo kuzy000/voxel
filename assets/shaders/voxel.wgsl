@@ -119,7 +119,6 @@ struct RayMarchFrame {
     index: u32,
     ipos: vec3<i32>,
     tmax: vec3<f32>,
-    tmax_prev: vec3<f32>,
 }
 
 fn trace(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
@@ -162,6 +161,8 @@ fn trace(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
     var diff = (local_pos - vec3<f32>(frames[depth].ipos));
     // diff = abs(diff - 0.5f);
     
+    var tmax_prev: vec3f;
+    
     // inside the root box
     if (inter_t == 0.f) {
         // Calc the starting depth
@@ -190,7 +191,7 @@ fn trace(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
         let v = abs(side_point - 0.5);
         mask = v.xyz >= max(v.xyz, max(v.yzx, v.zxy));
 
-        frames[depth].tmax_prev = frames[depth].tmax - vec3f(mask) * delta;
+        tmax_prev = frames[depth].tmax - vec3f(mask) * delta;
     }
     
     // if (false) {
@@ -213,11 +214,12 @@ fn trace(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
             if (depth == 0) {
                 break;
             }
+
             depth -= 1;
             let tmax = frames[depth].tmax;
             mask = tmax.xyz <= min(tmax.yzx, tmax.zxy);
             
-            frames[depth].tmax_prev = frames[depth].tmax;
+            tmax_prev = frames[depth].tmax;
             frames[depth].tmax += vec3<f32>(mask) * delta;
             frames[depth].ipos += vec3<i32>(mask) * istep;
             continue;
@@ -244,7 +246,8 @@ fn trace(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
                 var distance = 0.f;
                 var voxel_size = VOXEL_SIZE;
                 for (var j = VOXEL_TREE_DEPTH - 1; j >= 0; j--) {
-                    let tmax = frames[j].tmax_prev;
+                    //let tmax = frames[j].tmax_prev; accurate
+                    let tmax = frames[j].tmax;
                     distance += min(tmax.x, min(tmax.y, tmax.z)) * voxel_size;
                     voxel_size *= f32(VOXEL_DIM);
                 }
@@ -253,7 +256,7 @@ fn trace(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
             }
         }
         else if (get_voxel_nodes(index, ipos)) {
-            let tmax = frames[depth].tmax_prev;
+            let tmax = tmax_prev;
             
             var ipos_new = vec3i(0);
             var lpos_new = vec3f(0);
@@ -293,7 +296,7 @@ fn trace(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
             // frames[depth].local_pos = lpos_new;
             frames[depth].ipos = ipos_new;
             frames[depth].tmax = tmax_new;
-            frames[depth].tmax_prev = tmax_prev_new;
+            tmax_prev = tmax_prev_new;
             
             // if (nlocal_pos.x >= 0 && depth == 1) {
             //     let m = voxel_nodes[nindex].mask[1];
@@ -304,11 +307,10 @@ fn trace(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
             continue;
         }
         
-        
         let tmax = frames[depth].tmax;
         mask = tmax.xyz <= min(tmax.yzx, tmax.zxy);
 
-        frames[depth].tmax_prev = frames[depth].tmax;
+        tmax_prev = frames[depth].tmax;
         frames[depth].tmax += vec3<f32>(mask) * delta;
         frames[depth].ipos += vec3<i32>(mask) * istep;
     }
