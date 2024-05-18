@@ -32,12 +32,12 @@ impl FromWorld for VoxelGpuScene {
     fn from_world(world: &mut World) -> Self {
         let device = world.resource::<RenderDevice>();
 
-        let num_nodes = 1024 * 64;
-        let num_leafs = 1024 * 1024;
+        let bytes_nodes = 32 * 1024 * 1024; // 32MiB
+        let bytes_leafs = 2 * 1024 * 1024 * 1024; // 2GiB
 
-        let bytes_nodes = num_nodes * std::mem::size_of::<VoxelNode>();
-        let bytes_leafs = num_leafs * std::mem::size_of::<VoxelLeaf>();
-
+        let num_nodes = bytes_nodes / std::mem::size_of::<VoxelNode>();
+        let num_leafs = bytes_leafs / std::mem::size_of::<VoxelLeaf>();
+        
         info!(
             "Allocating gpu voxel scene; bytes_nodes: {}, bytes_leafs: {}",
             bytes_nodes,
@@ -55,11 +55,13 @@ impl FromWorld for VoxelGpuScene {
                         uniform_buffer::<ViewUniform>(true),
                         storage_buffer_read_only_sized(
                             false,
-                            Some((bytes_nodes as u64).try_into().unwrap()),
+                            // Some((bytes_nodes as u64).try_into().unwrap()),
+                            None,
                         ),
                         storage_buffer_read_only_sized(
                             false,
-                            Some((bytes_leafs as u64).try_into().unwrap()),
+                            // Some((bytes_leafs as u64).try_into().unwrap()),
+                            None,
                         ),
                     ),
                 ),
@@ -177,6 +179,18 @@ pub fn prepare_voxel_view_bind_groups(
     let Some(leafs) = gpu_scene.leafs.buffer() else {
         return;
     };
+    
+    let nodes_binding = BufferBinding {
+       buffer: &nodes,
+       offset: 0,
+       size: Some(((gpu_scene.nodes.capacity() * std::mem::size_of::<VoxelNode>()) as u64).try_into().unwrap())
+    };
+
+    let leafs_binding = BufferBinding {
+       buffer: &leafs,
+       offset: 0,
+       size: Some(((gpu_scene.leafs.capacity() * std::mem::size_of::<VoxelLeaf>()) as u64).try_into().unwrap())
+    };
 
     for view_entity in &views {
         let bind_group = device.create_bind_group(
@@ -184,8 +198,8 @@ pub fn prepare_voxel_view_bind_groups(
             &gpu_scene.bind_group_layout,
             &BindGroupEntries::sequential((
                 view_uniforms.clone(),
-                nodes.as_entire_binding(),
-                leafs.as_entire_binding(),
+                BindingResource::Buffer(nodes_binding.clone()),
+                BindingResource::Buffer(leafs_binding.clone()),
             )),
         );
 
@@ -293,14 +307,6 @@ impl RenderAsset for GpuVoxelTree {
         source_asset: Self::SourceAsset,
         (device, queue, gpu_scene): &mut SystemParamItem<Self::Param>,
     ) -> Result<Self, PrepareAssetError<Self::SourceAsset>> {
-        let mut nodes = StorageBuffer::default();
-        nodes.set(source_asset.nodes.clone());
-        nodes.write_buffer(device, queue);
-
-        let mut leafs = StorageBuffer::default();
-        leafs.set(source_asset.leafs.clone());
-        leafs.write_buffer(device, queue);
-
         {
             let gn = gpu_scene.nodes.capacity();
             let gl = gpu_scene.leafs.capacity();

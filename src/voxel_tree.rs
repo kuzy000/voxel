@@ -1,11 +1,12 @@
 use bevy::{prelude::*, render::{render_asset::RenderAsset, render_resource::ShaderType}};
 
 
-pub const VOXEL_DIM: usize = 4;
+pub const VOXEL_DIM: usize = 8;
 pub const VOXEL_TREE_DEPTH: usize = 6;
-pub const VOXEL_MASK_LEN: usize = 2;
-
 pub const VOXEL_COUNT: usize = VOXEL_DIM * VOXEL_DIM * VOXEL_DIM;
+
+pub const VOXEL_MASK_LEN: usize = (VOXEL_COUNT / 32) + ((VOXEL_COUNT % 32 != 0) as usize);
+
 
 pub fn pos_to_idx(ipos: IVec3) -> i32 {
     let dim = VOXEL_DIM as i32;
