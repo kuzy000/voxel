@@ -11,7 +11,7 @@
 #import voxel_tracer::sdf as sdf
 #import voxel_tracer::voxel as vox
 
-@group(0) @binding(0) var<uniform> view : View;
+@group(1) @binding(0) var<uniform> view : View;
 
 struct FragmentOutputWithDepth {
     @location(0) normal: vec4<f32>,

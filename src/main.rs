@@ -2,15 +2,22 @@
 #![allow(unused)]
 
 use bevy::{
-    color::palettes::css::GREEN, core_pipeline::{
+    color::palettes::css::GREEN,
+    core_pipeline::{
         core_3d::graph::{Core3d, Node3d},
         fxaa::Fxaa,
         prepass::{DeferredPrepass, DepthPrepass, MotionVectorPrepass, NormalPrepass},
-    }, diagnostic::{
+    },
+    diagnostic::{
         EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin,
         SystemInformationDiagnosticsPlugin,
-    }, ecs::system::{lifetimeless::SRes, SystemParamItem}, pbr::{DefaultOpaqueRendererMethod, DirectionalLightShadowMap}, prelude::*, render::{
+    },
+    ecs::system::{lifetimeless::SRes, SystemParamItem},
+    pbr::{DefaultOpaqueRendererMethod, DirectionalLightShadowMap},
+    prelude::*,
+    render::{
         extract_resource::ExtractResource,
+        graph::CameraDriverLabel,
         render_asset::{
             PrepareAssetError, RenderAsset, RenderAssetPlugin, RenderAssetUsages, RenderAssets,
         },
@@ -23,7 +30,8 @@ use bevy::{
         settings::{Backends, InstanceFlags, RenderCreation, WgpuSettings},
         texture::ImageSampler,
         Render, RenderApp, RenderPlugin, RenderSet,
-    }, window::WindowPlugin
+    },
+    window::WindowPlugin,
 };
 use std::{borrow::Cow, fs};
 
@@ -95,6 +103,7 @@ fn setup(
     std::mem::forget(asset_server.load::<Shader>("shaders/common.wgsl"));
     std::mem::forget(asset_server.load::<Shader>("shaders/sdf.wgsl"));
     std::mem::forget(asset_server.load::<Shader>("shaders/voxel.wgsl"));
+    std::mem::forget(asset_server.load::<Shader>("shaders/draw.wgsl"));
 
     let mut voxel_tree = VoxelTree::new(VOXEL_TREE_DEPTH as u8);
     //gen_test_scene(&mut voxel_tree, 4i32.pow(DEPTH as u32), Vec3::new(1., 0.5, 1.));
@@ -171,10 +180,14 @@ impl Plugin for VoxelTracerPlugin {
 
         render_app.add_systems(
             Render,
-            prepare_voxel_view_bind_groups.in_set(RenderSet::PrepareBindGroups),
+            (
+                prepare_voxel_bind_groups.in_set(RenderSet::PrepareBindGroups),
+                prepare_voxel_view_bind_groups
+                    .in_set(RenderSet::PrepareBindGroups)
+                    .after(prepare_voxel_bind_groups),
+            ),
         );
 
-        let mut render_graph = render_app.world_mut().resource_mut::<RenderGraph>();
         render_app
             .add_render_graph_node::<ViewNodeRunner<VoxelWorldPepassNode>>(
                 Core3d,
@@ -188,6 +201,10 @@ impl Plugin for VoxelTracerPlugin {
                     Node3d::CopyDeferredLightingId,
                 ),
             );
+
+        let mut render_graph = render_app.world_mut().resource_mut::<RenderGraph>();
+        render_graph.add_node(VoxelDrawNodeLabel, VoxelDrawNode::default());
+        render_graph.add_node_edge(VoxelDrawNodeLabel, CameraDriverLabel);
     }
 
     fn finish(&self, app: &mut App) {
@@ -202,8 +219,6 @@ struct LoadingCell {
     pos: IVec3,
 }
 
-pub fn update_gizmos(
-    mut gizmos: Gizmos,
-) {
+pub fn update_gizmos(mut gizmos: Gizmos) {
     gizmos.cuboid(Transform::from_scale(Vec3::splat(10.)), GREEN);
 }

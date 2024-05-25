@@ -9,6 +9,14 @@ const VOXEL_DIM: i32 = #{VOXEL_DIM};
 const VOXEL_COUNT: i32 = VOXEL_DIM * VOXEL_DIM * VOXEL_DIM;
 const VOXEL_TREE_DEPTH: i32 = #{VOXEL_TREE_DEPTH};
 
+struct VoxelInfo {
+    nodes_len: u32,
+    nodes_cap: u32,
+
+    leafs_len: u32,
+    leafs_cap: u32,
+}
+
 struct Voxel {
     color: u32,
 }
@@ -24,8 +32,9 @@ struct VoxelNode {
     indices: array<u32, VOXEL_COUNT>,
 }
 
-@group(0) @binding(1) var<storage, read> nodes: array<VoxelNode>;
-@group(0) @binding(2) var<storage, read> leafs: array<VoxelLeaf>;
+@group(0) @binding(0) var<uniform> info : VoxelInfo;
+@group(0) @binding(1) var<storage, read_write> nodes: array<VoxelNode>;
+@group(0) @binding(2) var<storage, read_write> leafs: array<VoxelLeaf>;
 
 fn pos_to_idx(ipos: vec3<i32>) -> u32 {
     return u32(ipos.x * VOXEL_DIM * VOXEL_DIM + ipos.y * VOXEL_DIM + ipos.z);

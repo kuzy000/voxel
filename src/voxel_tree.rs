@@ -1,12 +1,13 @@
-use bevy::{prelude::*, render::{render_asset::RenderAsset, render_resource::ShaderType}};
-
+use bevy::{
+    prelude::*,
+    render::{render_asset::RenderAsset, render_resource::ShaderType},
+};
 
 pub const VOXEL_DIM: usize = 8;
 pub const VOXEL_TREE_DEPTH: usize = 6;
 pub const VOXEL_COUNT: usize = VOXEL_DIM * VOXEL_DIM * VOXEL_DIM;
 
 pub const VOXEL_MASK_LEN: usize = (VOXEL_COUNT / 32) + ((VOXEL_COUNT % 32 != 0) as usize);
-
 
 pub fn pos_to_idx(ipos: IVec3) -> i32 {
     let dim = VOXEL_DIM as i32;
@@ -40,31 +41,31 @@ pub struct VoxelNode {
 }
 
 impl VoxelNode {
-//    pub fn debug_print(&self, self_idx: usize, depth: usize, tree: &VoxelTree) {
-//        let mask: u64 = ((self.mask[1] as u64) << 32) | (self.mask[0] as u64);
-//
-//        error!("{:indent$}Node: {}", "", self_idx, indent = depth * 2);
-//        error!(
-//            "{:indent$}Indices: {:?}",
-//            "",
-//            self.indices,
-//            indent = (depth + 1) * 2
-//        );
-//        if depth == 1 {
-//            return;
-//        }
-//
-//        for i in 0..64 {
-//            if mask & (1u64 << i) == 0 {
-//                continue;
-//            }
-//            error!("{:indent$}Idx: {}", "", i, indent = (depth + 1) * 2);
-//
-//            let nidx = self.indices[i as usize] as usize;
-//
-//            tree.nodes[nidx].debug_print(nidx, depth + 1, tree);
-//        }
-//    }
+    //    pub fn debug_print(&self, self_idx: usize, depth: usize, tree: &VoxelTree) {
+    //        let mask: u64 = ((self.mask[1] as u64) << 32) | (self.mask[0] as u64);
+    //
+    //        error!("{:indent$}Node: {}", "", self_idx, indent = depth * 2);
+    //        error!(
+    //            "{:indent$}Indices: {:?}",
+    //            "",
+    //            self.indices,
+    //            indent = (depth + 1) * 2
+    //        );
+    //        if depth == 1 {
+    //            return;
+    //        }
+    //
+    //        for i in 0..64 {
+    //            if mask & (1u64 << i) == 0 {
+    //                continue;
+    //            }
+    //            error!("{:indent$}Idx: {}", "", i, indent = (depth + 1) * 2);
+    //
+    //            let nidx = self.indices[i as usize] as usize;
+    //
+    //            tree.nodes[nidx].debug_print(nidx, depth + 1, tree);
+    //        }
+    //    }
 }
 
 impl Default for VoxelNode {
@@ -97,11 +98,11 @@ impl VoxelTree {
         }
     }
 
-//    pub fn debug_print(&self) {
-//        error!("Num of nodes: {}", self.nodes.len());
-//
-//        self.nodes[0].debug_print(0, 0, self);
-//    }
+    //    pub fn debug_print(&self) {
+    //        error!("Num of nodes: {}", self.nodes.len());
+    //
+    //        self.nodes[0].debug_print(0, 0, self);
+    //    }
 
     pub fn set_or_create_node(&mut self, parent_idx: u32, pos: IVec3) -> u32 {
         let nodes_len = self.nodes.len();
@@ -196,7 +197,7 @@ pub fn set_mask(mask: &mut [u32; VOXEL_MASK_LEN], idx: i32) {
 pub fn get_mask(mask: &[u32; VOXEL_MASK_LEN], idx: i32) -> bool {
     let a = idx >> 5;
     let b = a * 32;
-    return (mask[a as usize] & 1u32 << (idx - b)) > 0
+    return (mask[a as usize] & 1u32 << (idx - b)) > 0;
 }
 
 pub fn gen_voxel_leaf(offset: IVec3, f: &impl Fn(IVec3) -> bool) -> Option<VoxelLeaf> {
@@ -222,9 +223,7 @@ pub fn gen_voxel_leaf(offset: IVec3, f: &impl Fn(IVec3) -> bool) -> Option<Voxel
     if add {
         Some(VoxelLeaf {
             mask,
-            voxels: [Voxel {
-                color: 0x00ffffff,
-            }; VOXEL_COUNT],
+            voxels: [Voxel { color: 0x00ffffff }; VOXEL_COUNT],
         })
     } else {
         None
@@ -258,7 +257,7 @@ pub fn gen_voxel_node(
                     if let Some(leaf) = gen_voxel_leaf(offset, f) {
                         tree.nodes[idx_cur].indices[index as usize] = tree.leafs.len() as u32;
                         tree.leafs.push(leaf);
-                        
+
                         add = true;
 
                         set_mask(&mut mask, index);
@@ -299,7 +298,9 @@ pub fn gen_test_scene(voxel_tree: &mut VoxelTree, size: i32, color: Vec3) {
     let color = (color * 255.);
     let color = IVec3::new(color.x as i32, color.y as i32, color.z as i32);
     let color = (color.z << 16) | (color.y << 8) | (color.x << 0);
-    let voxel = Voxel { color: color as u32 };
+    let voxel = Voxel {
+        color: color as u32,
+    };
 
     for x in 0..size {
         for z in 0..size {

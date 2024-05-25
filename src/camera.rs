@@ -1,4 +1,9 @@
-use bevy::{diagnostic::{Diagnostic, DiagnosticPath, Diagnostics, RegisterDiagnostic}, ecs::entity::Entities, input::mouse::MouseMotion, prelude::*};
+use bevy::{
+    diagnostic::{Diagnostic, DiagnosticPath, Diagnostics, RegisterDiagnostic},
+    ecs::entity::Entities,
+    input::mouse::MouseMotion,
+    prelude::*,
+};
 
 #[derive(Component)]
 pub struct GameCamera;
@@ -89,10 +94,7 @@ impl CameraDiagnosticsPlugin {
     pub const POS_Y: DiagnosticPath = DiagnosticPath::const_new("camera_pos_y");
     pub const POS_Z: DiagnosticPath = DiagnosticPath::const_new("camera_pos_z");
 
-    pub fn diagnostic_system(
-        mut diagnostics: Diagnostics, 
-        q: Query<&Transform, With<GameCamera>>) {
-
+    pub fn diagnostic_system(mut diagnostics: Diagnostics, q: Query<&Transform, With<GameCamera>>) {
         let transform = q.single();
         let p = transform.translation;
 
