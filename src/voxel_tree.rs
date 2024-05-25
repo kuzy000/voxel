@@ -15,7 +15,7 @@ pub fn pos_to_idx(ipos: IVec3) -> i32 {
 
 #[derive(Reflect, Clone, Copy, Default, ShaderType, Debug)]
 pub struct Voxel {
-    pub color: Vec3,
+    pub color: u32,
 }
 
 #[derive(Reflect, Clone, ShaderType, Debug)]
@@ -28,7 +28,7 @@ impl Default for VoxelLeaf {
     fn default() -> Self {
         Self {
             mask: [0; VOXEL_MASK_LEN],
-            voxels: [Voxel { color: Vec3::ONE }; VOXEL_COUNT],
+            voxels: [Voxel { color: 0 }; VOXEL_COUNT],
         }
     }
 }
@@ -141,7 +141,7 @@ impl VoxelTree {
 
             self.leafs.push(VoxelLeaf {
                 mask: [0; VOXEL_MASK_LEN],
-                voxels: [Voxel { color: Vec3::ONE }; VOXEL_COUNT],
+                voxels: [Voxel { color: 0 }; VOXEL_COUNT],
             });
 
             res
@@ -223,7 +223,7 @@ pub fn gen_voxel_leaf(offset: IVec3, f: &impl Fn(IVec3) -> bool) -> Option<Voxel
         Some(VoxelLeaf {
             mask,
             voxels: [Voxel {
-                color: Vec3::splat(1.),
+                color: 0x00ffffff,
             }; VOXEL_COUNT],
         })
     } else {
@@ -296,7 +296,10 @@ pub fn gen_voxel_tree(depth: u8, f: &impl Fn(IVec3) -> bool) -> VoxelTree {
 }
 
 pub fn gen_test_scene(voxel_tree: &mut VoxelTree, size: i32, color: Vec3) {
-    let voxel = Voxel { color };
+    let color = (color * 255.);
+    let color = IVec3::new(color.x as i32, color.y as i32, color.z as i32);
+    let color = (color.z << 16) | (color.y << 8) | (color.x << 0);
+    let voxel = Voxel { color: color as u32 };
 
     for x in 0..size {
         for z in 0..size {

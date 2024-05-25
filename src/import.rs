@@ -23,7 +23,6 @@ pub fn rot_to_mat(rot: u8) -> IMat4 {
     res
 }
 
-
 pub fn place_vox_model(tree: &mut VoxelTree, vox: &DotVoxData, model_id: u32, tr: &IMat4) {
     let model = &vox.models[model_id as usize];
     
@@ -52,7 +51,12 @@ pub fn place_vox_model(tree: &mut VoxelTree, vox: &DotVoxData, model_id: u32, tr
         // }
         let color = Vec3::new(color.r as f32 / 255., color.g as f32 / 255., color.b as f32 / 255.);
 
-        tree.set_voxel(pos.xyz(), Voxel { color });
+        let color = (color * 255.);
+        let color = IVec3::new(color.x as i32, color.y as i32, color.z as i32);
+        let color = (color.z << 16) | (color.y << 8) | (color.x << 0);
+        let voxel = Voxel { color: color as u32 };
+
+        tree.set_voxel(pos.xyz(), voxel);
     }
 }
 
@@ -89,8 +93,8 @@ pub fn place_vox_scene_node(tree: &mut VoxelTree, vox: &DotVoxData, node_idx: u3
     }
 }
 
-pub fn place_vox(tree: &mut VoxelTree, vox: &DotVoxData) {
-    let t = IMat4::from_translation(IVec3::new(2000, 50, 2000));
+pub fn place_vox(tree: &mut VoxelTree, vox: &DotVoxData, offset: IVec3) {
+    let t = IMat4::from_translation(offset);
     let r = IMat4::from_cols(
         IVec4::new(1, 0, 0, 0),
         IVec4::new(0, 0, 1, 0),

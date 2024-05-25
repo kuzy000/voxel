@@ -7,7 +7,11 @@ use bevy::{
         deferred::{DEFERRED_LIGHTING_PASS_ID_FORMAT, DEFERRED_PREPASS_FORMAT},
         fullscreen_vertex_shader::fullscreen_shader_vertex_state,
         prepass::{ViewPrepassTextures, MOTION_VECTOR_PREPASS_FORMAT, NORMAL_PREPASS_FORMAT},
-    }, diagnostic::DiagnosticsStore, ecs::{query::QueryItem, system::lifetimeless::SResMut}, prelude::*, render::{
+    },
+    diagnostic::DiagnosticsStore,
+    ecs::{query::QueryItem, system::lifetimeless::SResMut},
+    prelude::*,
+    render::{
         camera::ExtractedCamera,
         prelude::*,
         render_graph::{NodeRunError, RenderGraphContext, ViewNode},
@@ -15,7 +19,8 @@ use bevy::{
         render_resource::binding_types::storage_buffer_read_only_sized,
         texture::GpuImage,
         view::{ViewDepthTexture, ViewUniform, ViewUniformOffset, ViewUniforms},
-    }, utils::info
+    },
+    utils::info,
 };
 
 use crate::*;
@@ -37,11 +42,10 @@ impl FromWorld for VoxelGpuScene {
 
         let num_nodes = bytes_nodes / std::mem::size_of::<VoxelNode>();
         let num_leafs = bytes_leafs / std::mem::size_of::<VoxelLeaf>();
-        
+
         info!(
             "Allocating gpu voxel scene; bytes_nodes: {}, bytes_leafs: {}",
-            bytes_nodes,
-            bytes_leafs,
+            bytes_nodes, bytes_leafs,
         );
 
         let mut res = Self {
@@ -54,13 +58,11 @@ impl FromWorld for VoxelGpuScene {
                     (
                         uniform_buffer::<ViewUniform>(true),
                         storage_buffer_read_only_sized(
-                            false,
-                            // Some((bytes_nodes as u64).try_into().unwrap()),
+                            false, // Some((bytes_nodes as u64).try_into().unwrap()),
                             None,
                         ),
                         storage_buffer_read_only_sized(
-                            false,
-                            // Some((bytes_leafs as u64).try_into().unwrap()),
+                            false, // Some((bytes_leafs as u64).try_into().unwrap()),
                             None,
                         ),
                     ),
@@ -114,18 +116,9 @@ impl FromWorld for VoxelPipelines {
                 fragment: Some(FragmentState {
                     shader: shader.clone(),
                     shader_defs: vec![
-                        ShaderDefVal::Int(
-                            "VOXEL_DIM".into(), 
-                            VOXEL_DIM as i32,
-                        ),
-                        ShaderDefVal::Int(
-                            "VOXEL_TREE_DEPTH".into(), 
-                            VOXEL_TREE_DEPTH as i32,
-                        ),
-                        ShaderDefVal::Int(
-                            "VOXEL_MASK_LEN".into(), 
-                            VOXEL_MASK_LEN as i32,
-                        ),
+                        ShaderDefVal::Int("VOXEL_DIM".into(), VOXEL_DIM as i32),
+                        ShaderDefVal::Int("VOXEL_TREE_DEPTH".into(), VOXEL_TREE_DEPTH as i32),
+                        ShaderDefVal::Int("VOXEL_MASK_LEN".into(), VOXEL_MASK_LEN as i32),
                     ],
                     entry_point: "fragment".into(),
                     targets: vec![
@@ -179,17 +172,25 @@ pub fn prepare_voxel_view_bind_groups(
     let Some(leafs) = gpu_scene.leafs.buffer() else {
         return;
     };
-    
+
     let nodes_binding = BufferBinding {
-       buffer: &nodes,
-       offset: 0,
-       size: Some(((gpu_scene.nodes.capacity() * std::mem::size_of::<VoxelNode>()) as u64).try_into().unwrap())
+        buffer: &nodes,
+        offset: 0,
+        size: Some(
+            ((gpu_scene.nodes.capacity() * std::mem::size_of::<VoxelNode>()) as u64)
+                .try_into()
+                .unwrap(),
+        ),
     };
 
     let leafs_binding = BufferBinding {
-       buffer: &leafs,
-       offset: 0,
-       size: Some(((gpu_scene.leafs.capacity() * std::mem::size_of::<VoxelLeaf>()) as u64).try_into().unwrap())
+        buffer: &leafs,
+        offset: 0,
+        size: Some(
+            ((gpu_scene.leafs.capacity() * std::mem::size_of::<VoxelLeaf>()) as u64)
+                .try_into()
+                .unwrap(),
+        ),
     };
 
     for view_entity in &views {

@@ -2,19 +2,14 @@
 #![allow(unused)]
 
 use bevy::{
-    core_pipeline::{
+    color::palettes::css::GREEN, core_pipeline::{
         core_3d::graph::{Core3d, Node3d},
         fxaa::Fxaa,
         prepass::{DeferredPrepass, DepthPrepass, MotionVectorPrepass, NormalPrepass},
-    },
-    diagnostic::{
+    }, diagnostic::{
         EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin,
         SystemInformationDiagnosticsPlugin,
-    },
-    ecs::system::{lifetimeless::SRes, SystemParamItem},
-    pbr::{DefaultOpaqueRendererMethod, DirectionalLightShadowMap},
-    prelude::*,
-    render::{
+    }, ecs::system::{lifetimeless::SRes, SystemParamItem}, pbr::{DefaultOpaqueRendererMethod, DirectionalLightShadowMap}, prelude::*, render::{
         extract_resource::ExtractResource,
         render_asset::{
             PrepareAssetError, RenderAsset, RenderAssetPlugin, RenderAssetUsages, RenderAssets,
@@ -28,8 +23,7 @@ use bevy::{
         settings::{Backends, InstanceFlags, RenderCreation, WgpuSettings},
         texture::ImageSampler,
         Render, RenderApp, RenderPlugin, RenderSet,
-    },
-    window::WindowPlugin,
+    }, window::WindowPlugin
 };
 use std::{borrow::Cow, fs};
 
@@ -65,6 +59,11 @@ fn main() {
                 .set(RenderPlugin {
                     render_creation: RenderCreation::Automatic(WgpuSettings {
                         instance_flags: InstanceFlags::default().with_env() | InstanceFlags::DEBUG,
+                        // constrained_limits: WgpuLimits {
+                        //     max_storage_buffer_binding_size: u32::MAX, // 4GiB
+                        //     max_buffer_size: (u32::MAX as u64),
+                        //     ..default()
+                        // }.into(),
                         ..default()
                     }),
                     ..default()
@@ -73,7 +72,8 @@ fn main() {
             ui::GameUiPlugin,
         ))
         .add_systems(Startup, setup)
-        .add_systems(Update, update_game_camera);
+        .add_systems(Update, update_game_camera)
+        .add_systems(Update, update_gizmos);
 
     let render_graph = bevy_mod_debugdump::render_graph_dot(&app, &default());
     fs::write("render_graph.graph", render_graph);
@@ -96,15 +96,15 @@ fn setup(
     std::mem::forget(asset_server.load::<Shader>("shaders/sdf.wgsl"));
     std::mem::forget(asset_server.load::<Shader>("shaders/voxel.wgsl"));
 
-
     let mut voxel_tree = VoxelTree::new(VOXEL_TREE_DEPTH as u8);
     //gen_test_scene(&mut voxel_tree, 4i32.pow(DEPTH as u32), Vec3::new(1., 0.5, 1.));
 
-    let model_path = "assets/Church_Of_St_Sophia.vox";
-    // let model_path = "assets/monu2.vox";
+    // let model_path = "assets/Church_Of_St_Sophia.vox";
+    let model_path = "assets/monu2.vox";
 
     let vox_model = dot_vox::load(model_path).expect("Failed to load");
-    place_vox(&mut voxel_tree, &vox_model);
+    // place_vox(&mut voxel_tree, &vox_model, IVec3::new(2000, 50, 2000));
+    place_vox(&mut voxel_tree, &vox_model, IVec3::new(200, 50, 200));
 
     std::mem::forget(voxel_trees.add(voxel_tree));
 
@@ -195,4 +195,15 @@ impl Plugin for VoxelTracerPlugin {
         render_app.init_resource::<VoxelGpuScene>();
         render_app.init_resource::<VoxelPipelines>();
     }
+}
+
+#[derive(Component)]
+struct LoadingCell {
+    pos: IVec3,
+}
+
+pub fn update_gizmos(
+    mut gizmos: Gizmos,
+) {
+    gizmos.cuboid(Transform::from_scale(Vec3::splat(10.)), GREEN);
 }

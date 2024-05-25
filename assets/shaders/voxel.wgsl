@@ -10,7 +10,7 @@ const VOXEL_COUNT: i32 = VOXEL_DIM * VOXEL_DIM * VOXEL_DIM;
 const VOXEL_TREE_DEPTH: i32 = #{VOXEL_TREE_DEPTH};
 
 struct Voxel {
-    color: vec3f,
+    color: u32,
 }
 
 struct VoxelLeaf {
@@ -236,7 +236,7 @@ fn trace(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
                 let voxel = leafs[index].voxels[pos_to_idx(ipos)];
 
                 let normal = -normalize(vec3<f32>(mask) * vec3<f32>(istep));
-                let color = voxel.color; //normal * .5 + .5;
+                let color = vec3f(unpack4x8unorm(voxel.color).xyz); //normal * .5 + .5;
                 // let color = vec3f(ipos) / 4.f;
                 
                 var distance = 0.f;
