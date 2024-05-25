@@ -7,36 +7,11 @@
 #import bevy_pbr::pbr_deferred_functions::deferred_gbuffer_from_pbr_input
 
 #import voxel_tracer::common::RayMarchResult
+#import voxel_tracer::common::DST_MAX
 #import voxel_tracer::sdf as sdf
 #import voxel_tracer::voxel as vox
 
-const VOXEL_SIZE: f32 = 1.0f;
-const VOXEL_DIM: i32 = 4;
-const VOXEL_COUNT: i32 = VOXEL_DIM * VOXEL_DIM * VOXEL_DIM;
-const VOXEL_TREE_DEPTH: i32 = 6;
-
-const DST_MAX = 1e9f;
-
-struct Voxel {
-    color: vec3f,
-}
-
-struct VoxelLeaf {
-    mask: array<u32, 2>,
-    voxels: array<Voxel, VOXEL_COUNT>,
-}
-
-struct VoxelNode {
-    mask: array<u32, 2>,
-    // Indices to either `voxel_nodes` or voxel_leafs` depending on the current depth
-    indices: array<u32, VOXEL_COUNT>,
-}
-
-
 @group(0) @binding(0) var<uniform> view : View;
-@group(0) @binding(1) var<storage, read> voxel_nodes: array<VoxelNode>;
-@group(0) @binding(2) var<storage, read> voxel_leafs: array<VoxelLeaf>;
-
 
 struct FragmentOutputWithDepth {
     @location(0) normal: vec4<f32>,
