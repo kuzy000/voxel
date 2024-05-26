@@ -1,13 +1,22 @@
-#define_import_path voxel_tracer::voxel
+#define_import_path voxel_tracer::voxel_read
 
-#import voxel_tracer::common::{RayMarchResult, DST_MAX}
+#import voxel_tracer::common::{
+    DST_MAX,
+    Intersection,
+    RayMarchResult,
+    ray_bbox,
+    is_inside,
+}
 
-const MAX_STEPS: i32 = 512;
-
-const VOXEL_SIZE: f32 = 1.0f;
-const VOXEL_DIM: i32 = #{VOXEL_DIM};
-const VOXEL_COUNT: i32 = VOXEL_DIM * VOXEL_DIM * VOXEL_DIM;
-const VOXEL_TREE_DEPTH: i32 = #{VOXEL_TREE_DEPTH};
+#import voxel_tracer::voxel_common::{
+    VOXEL_SIZE,
+    VOXEL_DIM,
+    VOXEL_COUNT,
+    VOXEL_TREE_DEPTH,
+    VOXEL_MASK_LEN,
+    VOXEL_SIZES,
+    pos_to_idx,
+}
 
 struct VoxelInfo {
     nodes_len: u32,
@@ -22,23 +31,21 @@ struct Voxel {
 }
 
 struct VoxelLeaf {
-    mask: array<u32, #{VOXEL_MASK_LEN}>,
+    mask: array<u32, VOXEL_MASK_LEN>,
     voxels: array<Voxel, VOXEL_COUNT>,
 }
 
 struct VoxelNode {
-    mask: array<u32, #{VOXEL_MASK_LEN}>,
+    mask: array<u32, VOXEL_MASK_LEN>,
     // Indices to either `nodes` or `leafs` depending on the current depth
     indices: array<u32, VOXEL_COUNT>,
 }
 
-@group(0) @binding(0) var<uniform> info : VoxelInfo;
+@group(0) @binding(0) var<storage, read_write> info : VoxelInfo;
 @group(0) @binding(1) var<storage, read_write> nodes: array<VoxelNode>;
 @group(0) @binding(2) var<storage, read_write> leafs: array<VoxelLeaf>;
 
-fn pos_to_idx(ipos: vec3<i32>) -> u32 {
-    return u32(ipos.x * VOXEL_DIM * VOXEL_DIM + ipos.y * VOXEL_DIM + ipos.z);
-}
+const MAX_STEPS: i32 = 512;
 
 fn get_voxel_leaf(index: u32, ipos: vec3<i32>) -> bool {
     let i = pos_to_idx(ipos);
@@ -60,66 +67,6 @@ fn get_voxel_nodes(index: u32, ipos: vec3<i32>) -> bool {
     return ((*node).mask[ti] & (1u << (i - oi))) > 0;
 }
 
-struct Intersection {
-    has: bool,
-    t: f32,
-}
-
-// https://gamedev.stackexchange.com/questions/18436/most-efficient-aabb-vs-ray-collision-algorithms
-fn ray_bbox(org: vec3f, dir: vec3f, lb: vec3f, rt: vec3f) -> Intersection {
-    // r.dir is unit direction vector of ray
-    var dirfrac = vec3f(0.f);
-    dirfrac.x = 1.0f / dir.x;
-    dirfrac.y = 1.0f / dir.y;
-    dirfrac.z = 1.0f / dir.z;
-    // lb is the corner of AABB with minimal coordinates - left bottom, rt is maximal corner
-    // r.org is origin of ray
-    let t1 = (lb.x - org.x) * dirfrac.x;
-    let t2 = (rt.x - org.x) * dirfrac.x;
-    let t3 = (lb.y - org.y) * dirfrac.y;
-    let t4 = (rt.y - org.y) * dirfrac.y;
-    let t5 = (lb.z - org.z) * dirfrac.z;
-    let t6 = (rt.z - org.z) * dirfrac.z;
-
-    let tmin = max(max(min(t1, t2), min(t3, t4)), min(t5, t6));
-    let tmax = min(min(max(t1, t2), max(t3, t4)), max(t5, t6));
-
-    // if tmax < 0, ray (line) is intersecting AABB, but the whole AABB is behind us
-    if (tmax < 0)
-    {
-        return Intersection(false, tmax);
-    }
-
-    // if tmin > tmax, ray doesn't intersect AABB
-    if (tmin > tmax)
-    {
-        return Intersection(false, tmax);
-    }
-
-    return Intersection(true, tmin);
-}
-
-fn is_inside(pos: vec3f, a: vec3f, b: vec3f) -> bool {
-    if (pos.x < a.x) { return false; }
-    if (pos.y < a.y) { return false; }
-    if (pos.z < a.z) { return false; }
-    if (pos.x > b.x) { return false; }
-    if (pos.y > b.y) { return false; }
-    if (pos.z > b.z) { return false; }
-    
-    return true;
-}
-
-const voxel_sizes = array(
-    VOXEL_SIZE * f32(pow(f32(VOXEL_DIM), f32(u32(VOXEL_TREE_DEPTH) - 0))),
-    VOXEL_SIZE * f32(pow(f32(VOXEL_DIM), f32(u32(VOXEL_TREE_DEPTH) - 1))),
-    VOXEL_SIZE * f32(pow(f32(VOXEL_DIM), f32(u32(VOXEL_TREE_DEPTH) - 2))),
-    VOXEL_SIZE * f32(pow(f32(VOXEL_DIM), f32(u32(VOXEL_TREE_DEPTH) - 3))),
-    VOXEL_SIZE * f32(pow(f32(VOXEL_DIM), f32(u32(VOXEL_TREE_DEPTH) - 4))),
-    VOXEL_SIZE * f32(pow(f32(VOXEL_DIM), f32(u32(VOXEL_TREE_DEPTH) - 5))),
-);
-
-
 struct RayMarchFrame {
     index: u32,
     ipos: vec3<i32>,
@@ -130,8 +77,8 @@ fn trace(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
     var frames: array<RayMarchFrame, VOXEL_TREE_DEPTH>;
     
     var inter_t = 0.f;
-    if (!is_inside(pos, vec3f(0.), vec3f(voxel_sizes[0]))) {
-        let intersection = ray_bbox(pos, dir, vec3f(0.), vec3f(voxel_sizes[0u]));
+    if (!is_inside(pos, vec3f(0.), vec3f(VOXEL_SIZES[0]))) {
+        let intersection = ray_bbox(pos, dir, vec3f(0.), vec3f(VOXEL_SIZES[0u]));
         if (!intersection.has) {
             return RayMarchResult(vec3<f32>(), vec3<f32>(), DST_MAX);
         }
@@ -144,10 +91,10 @@ fn trace(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
     var depth = 0;
 
     // TODO remove it it. It should already be inside the box
-    let global_pos = clamp(in_pos0, vec3f(0.), vec3f(voxel_sizes[0u]));
+    let global_pos = clamp(in_pos0, vec3f(0.), vec3f(VOXEL_SIZES[0u]));
 
     // Apply offset and scale as if `voxel_size = 1.f`
-    let local_pos = global_pos / voxel_sizes[1u];
+    let local_pos = global_pos / VOXEL_SIZES[1u];
 
     frames[depth].index = 0u;
     frames[depth].ipos = clamp(vec3<i32>(floor(local_pos)), vec3i(0), vec3i(VOXEL_DIM - 1));
@@ -192,7 +139,7 @@ fn trace(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
         }
     }
     else {
-        side_point = global_pos / voxel_sizes[0];
+        side_point = global_pos / VOXEL_SIZES[0];
         let v = abs(side_point - 0.5);
         mask = v.xyz >= max(v.xyz, max(v.yzx, v.zxy));
 
@@ -321,4 +268,19 @@ fn trace(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
     }
     
     return RayMarchResult(vec3<f32>(), vec3<f32>(), DST_MAX);
+}
+
+fn place(pos: vec3i, voxel: Voxel) {
+    var parent_idx = 0;
+    for (var depth = 1; depth < VOXEL_TREE_DEPTH; depth++) {
+        let lpos = (pos / VOXEL_SIZES[depth]) % VOXEL_DIM;
+
+        let idx = pos_to_idx(lpos);
+        let node = &nodes[parent_idx];
+        
+        let ti = idx >> 5;
+        let oi = ti * 32;
+        
+        return ((*node).mask[ti] & (1u << (idx - oi))) > 0;
+    }
 }

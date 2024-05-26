@@ -17,7 +17,7 @@ use bevy::{
         render_graph::{NodeRunError, RenderGraphContext, ViewNode},
         render_phase::TrackedRenderPass,
         render_resource::{
-            binding_types::{storage_buffer_read_only_sized, storage_buffer_sized},
+            binding_types::{storage_buffer, storage_buffer_read_only_sized, storage_buffer_sized},
             encase::internal::{BufferMut, WriteInto, Writer},
         },
         texture::GpuImage,
@@ -104,9 +104,9 @@ pub struct VoxelGpuSceneInfo {
 
 #[derive(Resource)]
 pub struct VoxelGpuScene {
+    pub info: StorageBuffer<VoxelGpuSceneInfo>,
     pub nodes: GpuBufferAllocator<VoxelNode>,
     pub leafs: GpuBufferAllocator<VoxelLeaf>,
-    pub info: UniformBuffer<VoxelGpuSceneInfo>,
 
     pub bind_group_layout_view: BindGroupLayout,
     pub bind_group_layout_voxel: BindGroupLayout,
@@ -141,9 +141,9 @@ impl FromWorld for VoxelGpuScene {
         };
 
         Self {
+            info: info.into(),
             nodes,
             leafs,
-            info: info.into(),
             bind_group_layout_view: device.create_bind_group_layout(
                 "voxel_view_bind_group_layout",
                 &BindGroupLayoutEntries::sequential(
@@ -156,7 +156,7 @@ impl FromWorld for VoxelGpuScene {
                 &BindGroupLayoutEntries::sequential(
                     ShaderStages::FRAGMENT | ShaderStages::COMPUTE,
                     (
-                        uniform_buffer::<VoxelGpuSceneInfo>(false),
+                        storage_buffer::<VoxelGpuSceneInfo>(false),
                         storage_buffer_sized(false, Some(nodes_size)),
                         storage_buffer_sized(false, Some(leafs_size)),
                     ),
@@ -505,7 +505,14 @@ impl render_graph::Node for VoxelDrawNode {
             VoxelDrawState::Run => {
                 self.state = VoxelDrawState::Done;
             }
-            VoxelDrawState::Done => (),
+            VoxelDrawState::Done => {
+                match pipeline_cache.get_compute_pipeline_state(voxel_pipelines.draw) {
+                    CachedPipelineState::Ok(_) => {
+                        self.state = VoxelDrawState::Loading;
+                    }
+                    _ => (),
+                }
+            }
         }
     }
 

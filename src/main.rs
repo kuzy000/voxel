@@ -102,7 +102,9 @@ fn setup(
     // TODO: is there better way?
     std::mem::forget(asset_server.load::<Shader>("shaders/common.wgsl"));
     std::mem::forget(asset_server.load::<Shader>("shaders/sdf.wgsl"));
-    std::mem::forget(asset_server.load::<Shader>("shaders/voxel.wgsl"));
+    std::mem::forget(asset_server.load::<Shader>("shaders/voxel_common.wgsl"));
+    std::mem::forget(asset_server.load::<Shader>("shaders/voxel_read.wgsl"));
+    std::mem::forget(asset_server.load::<Shader>("shaders/voxel_write.wgsl"));
     std::mem::forget(asset_server.load::<Shader>("shaders/draw.wgsl"));
 
     let mut voxel_tree = VoxelTree::new(VOXEL_TREE_DEPTH as u8);

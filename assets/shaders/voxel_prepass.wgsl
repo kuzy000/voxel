@@ -9,7 +9,7 @@
 #import voxel_tracer::common::RayMarchResult
 #import voxel_tracer::common::DST_MAX
 #import voxel_tracer::sdf as sdf
-#import voxel_tracer::voxel as vox
+#import voxel_tracer::voxel_read as vox
 
 @group(1) @binding(0) var<uniform> view : View;
 
