@@ -28,6 +28,9 @@ use bevy::{
 
 use crate::*;
 
+const WORKING_GROUP: IVec3 = IVec3::new(8, 8, 8);
+const DISPATCH_SIZE: IVec3 = IVec3::new(2, 1, 1);
+
 pub struct GpuBufferAllocator<T>
 where
     T: ShaderType + WriteInto,
@@ -57,7 +60,7 @@ where
     }
 
     pub fn write(&mut self, offset: u64, data: &[T], device: &RenderDevice, queue: &RenderQueue) {
-        assert!((offset + data.len() as u64) < self.size);
+        assert!((offset + data.len() as u64) <= self.size);
 
         let offset = u64::from(T::min_size()) * offset;
         let size = u64::from(T::min_size()) * (data.len() as u64);
@@ -116,8 +119,11 @@ impl FromWorld for VoxelGpuScene {
     fn from_world(world: &mut World) -> Self {
         let device = world.resource::<RenderDevice>();
 
-        let bytes_nodes = 32 * 1024 * 1024; // 32MiB
-        let bytes_leafs = 2 * 1024 * 1024 * 1024; // 2GiB
+        //let bytes_nodes = 32 * 1024 * 1024; // 32MiB
+        //let bytes_leafs = 2 * 1024 * 1024 * 1024; // 2GiB
+
+        let bytes_nodes = 8 * 1024 * 1024; // 8MiB
+        let bytes_leafs = 64 * 1024 * 1024; // 64MiB
 
         let num_nodes = bytes_nodes / std::mem::size_of::<VoxelNode>();
         let num_leafs = bytes_leafs / std::mem::size_of::<VoxelLeaf>();
@@ -185,8 +191,19 @@ impl FromWorld for VoxelPipelines {
         let shader_defs = vec![
             ShaderDefVal::Int("VOXEL_DIM".into(), VOXEL_DIM as i32),
             ShaderDefVal::Int("VOXEL_TREE_DEPTH".into(), VOXEL_TREE_DEPTH as i32),
-            ShaderDefVal::Int("VOXEL_MASK_LEN".into(), VOXEL_MASK_LEN as i32),
+            ShaderDefVal::UInt("VOXEL_IDX_EMPTY".into(), VOXEL_IDX_EMPTY as u32),
+            // ShaderDefVal::Int("VOXEL_MASK_LEN".into(), VOXEL_MASK_LEN as i32),
         ];
+
+        let shader_defs_compute = [
+            shader_defs.as_slice(),
+            &[
+                ShaderDefVal::UInt("WG_X".into(), WORKING_GROUP.x as u32),
+                ShaderDefVal::UInt("WG_Y".into(), WORKING_GROUP.y as u32),
+                ShaderDefVal::UInt("WG_Z".into(), WORKING_GROUP.z as u32),
+            ],
+        ]
+        .concat();
 
         Self {
             prepass: pipeline_cache.queue_render_pipeline(RenderPipelineDescriptor {
@@ -245,7 +262,7 @@ impl FromWorld for VoxelPipelines {
                 layout: vec![voxel_layout.clone()],
                 push_constant_ranges: Vec::new(),
                 shader: shader_draw,
-                shader_defs: shader_defs.clone(),
+                shader_defs: shader_defs_compute.clone(),
                 entry_point: "draw".into(),
             }),
         }
@@ -451,6 +468,15 @@ impl RenderAsset for GpuVoxelTree {
             assert!(gl >= sl, "leafs {} >= {}", gl, sl);
         }
 
+        {
+            let nodes = vec![VoxelNode::default(); gpu_scene.nodes.size() as usize];
+            gpu_scene.nodes.write(0, nodes.as_slice(), device, queue);
+        }
+        {
+            let leafs = vec![VoxelLeaf::default(); gpu_scene.leafs.size() as usize];
+            gpu_scene.leafs.write(0, leafs.as_slice(), device, queue);
+        }
+
         gpu_scene
             .nodes
             .write(0, source_asset.nodes.as_slice(), device, queue);
@@ -546,7 +572,12 @@ impl render_graph::Node for VoxelDrawNode {
         );
 
         pass.set_bind_group(0, &voxel_bind_group.0, &[]);
-        pass.dispatch_workgroups(1, 1, 1);
+
+        let x = DISPATCH_SIZE.x.try_into().unwrap();
+        let y = DISPATCH_SIZE.y.try_into().unwrap();
+        let z = DISPATCH_SIZE.z.try_into().unwrap();
+
+        pass.dispatch_workgroups(x, y, z);
 
         Ok(())
     }

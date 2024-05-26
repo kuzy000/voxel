@@ -13,8 +13,8 @@
     VOXEL_DIM,
     VOXEL_COUNT,
     VOXEL_TREE_DEPTH,
-    VOXEL_MASK_LEN,
     VOXEL_SIZES,
+    VOXEL_IDX_EMPTY,
     pos_to_idx,
 }
 
@@ -31,12 +31,12 @@ struct Voxel {
 }
 
 struct VoxelLeaf {
-    mask: array<u32, VOXEL_MASK_LEN>,
+    // mask: array<u32, VOXEL_MASK_LEN>,
     voxels: array<Voxel, VOXEL_COUNT>,
 }
 
 struct VoxelNode {
-    mask: array<u32, VOXEL_MASK_LEN>,
+    // mask: array<u32, VOXEL_MASK_LEN>,
     // Indices to either `nodes` or `leafs` depending on the current depth
     indices: array<u32, VOXEL_COUNT>,
 }
@@ -51,20 +51,24 @@ fn get_voxel_leaf(index: u32, ipos: vec3<i32>) -> bool {
     let i = pos_to_idx(ipos);
     let leaf = &leafs[index];
     
-    let ti = i >> 5;
-    let oi = ti * 32;
+    // let ti = i >> 5;
+    // let oi = ti * 32;
+    // 
+    // return ((*leaf).mask[ti] & (1u << (i - oi))) > 0;
     
-    return ((*leaf).mask[ti] & (1u << (i - oi))) > 0;
+    return (*leaf).voxels[i].color != VOXEL_IDX_EMPTY;
 }
 
 fn get_voxel_nodes(index: u32, ipos: vec3<i32>) -> bool {
     let i = pos_to_idx(ipos);
     let node = &nodes[index];
     
-    let ti = i >> 5;
-    let oi = ti * 32;
-    
-    return ((*node).mask[ti] & (1u << (i - oi))) > 0;
+    // let ti = i >> 5;
+    // let oi = ti * 32;
+    // 
+    // return ((*node).mask[ti] & (1u << (i - oi))) > 0;
+
+    return (*node).indices[i] != VOXEL_IDX_EMPTY;
 }
 
 struct RayMarchFrame {
@@ -268,19 +272,4 @@ fn trace(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
     }
     
     return RayMarchResult(vec3<f32>(), vec3<f32>(), DST_MAX);
-}
-
-fn place(pos: vec3i, voxel: Voxel) {
-    var parent_idx = 0;
-    for (var depth = 1; depth < VOXEL_TREE_DEPTH; depth++) {
-        let lpos = (pos / VOXEL_SIZES[depth]) % VOXEL_DIM;
-
-        let idx = pos_to_idx(lpos);
-        let node = &nodes[parent_idx];
-        
-        let ti = idx >> 5;
-        let oi = ti * 32;
-        
-        return ((*node).mask[ti] & (1u << (idx - oi))) > 0;
-    }
 }

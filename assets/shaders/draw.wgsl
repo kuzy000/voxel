@@ -7,15 +7,25 @@
 }
 #import voxel_tracer::voxel_write as vox
 
-@compute @workgroup_size(1, 1, 1)
-fn draw(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
-    for (var i = 0; i < VOXEL_TREE_DEPTH; i++) {
-        vox::leafs[0].mask[i] = ~u32(0);
-    }
+@compute @workgroup_size(#{WG_X}, #{WG_Y}, #{WG_Z})
+fn draw(
+    @builtin(global_invocation_id) invocation_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>
+) {
+    let x = i32(invocation_id.x);
+    let y = i32(invocation_id.y);
+    let z = i32(invocation_id.z);
 
-    let color = pack4x8unorm(vec4(1., 0., 0., 1.));
+    let wgsize = vec3i(#{WG_X}, #{WG_Y}, #{WG_Z});
+    let size = wgsize * vec3i(num_workgroups);
 
-    for (var i = 0; i < VOXEL_COUNT; i++) {
-        vox::leafs[0].voxels[i].color = color;
+    let v = vec3f(f32(x), f32(y), f32(z));
+    let pos = vec3i(x, y, z) + vec3i(10);
+
+    let vn = (v / vec3f(size - vec3i(1)));
+    let color = pack4x8unorm(vec4(vn, 0.));
+
+    if (length(vn * 2. - 1.) < 1.) {
+        vox::place(pos, color);
     }
 }
