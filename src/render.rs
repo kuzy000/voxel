@@ -29,7 +29,7 @@ use bevy::{
 use crate::*;
 
 const WORKING_GROUP: IVec3 = IVec3::new(8, 8, 8);
-const DISPATCH_SIZE: IVec3 = IVec3::new(2, 1, 1);
+const DISPATCH_SIZE: IVec3 = IVec3::new(16, 16, 16);
 
 pub struct GpuBufferAllocator<T>
 where
@@ -119,11 +119,8 @@ impl FromWorld for VoxelGpuScene {
     fn from_world(world: &mut World) -> Self {
         let device = world.resource::<RenderDevice>();
 
-        //let bytes_nodes = 32 * 1024 * 1024; // 32MiB
-        //let bytes_leafs = 2 * 1024 * 1024 * 1024; // 2GiB
-
-        let bytes_nodes = 8 * 1024 * 1024; // 8MiB
-        let bytes_leafs = 64 * 1024 * 1024; // 64MiB
+        let bytes_nodes = 64 * 1024 * 1024; // 64MiB
+        let bytes_leafs = 512 * 1024 * 1024; // 512MiB
 
         let num_nodes = bytes_nodes / std::mem::size_of::<VoxelNode>();
         let num_leafs = bytes_leafs / std::mem::size_of::<VoxelLeaf>();
