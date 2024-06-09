@@ -52,19 +52,22 @@ fn fragment(in: FullscreenVertexOutput) -> FragmentOutputWithDepth {
         res = res_vox;
     }
     
-    if (res.distance >= DST_MAX) {
-        discard;
-    }
+    //if (res.distance >= DST_MAX) {
+    //    discard;
+    //}
+    
+    //let color = res.normal + 1. * 0.5; 
+    let color = res.color * (dot(res.normal, normalize(vec3f(1., 1., 1.,))) * .5 + .5) + (res.color_debug.xyz) * res.color_debug.w;
 
     var pbr_input = pbr_input_new();
-     
+    
     pbr_input.frag_coord = vec4(in.uv, 0.5, 1.);
     // pbr_input.material.base_color = vec4f(res.normal * 0.5 + 0.5, 1.);
-    pbr_input.material.base_color = vec4f(res.color, 1.);
+    pbr_input.material.base_color = vec4f(color, 1.);
     pbr_input.material.flags |= STANDARD_MATERIAL_FLAGS_UNLIT_BIT;
     //pbr_input.N = res.position;
  
-     // TODO take into account distance from the camera to the near clipping plane
+    // TODO take into account distance from the camera to the near clipping plane
     let depth = view_z_to_depth_ndc(-res.distance);
  
     var newOut: FragmentOutputWithDepth;

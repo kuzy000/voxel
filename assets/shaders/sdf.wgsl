@@ -60,7 +60,7 @@ fn trace(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
         if (dst < min_dst) {
             let normal = normal_world(p);
             let color = normal * 0.5 + 0.5;
-            return RayMarchResult(normal, color, ray_len);
+            return RayMarchResult(normal, color, ray_len, vec4f(0.));
         }
         
         if (dst > max_dst) {
@@ -70,6 +70,6 @@ fn trace(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
         ray_len += dst;
     }
 
-    return RayMarchResult(vec3<f32>(), vec3<f32>(), DST_MAX);
+    return RayMarchResult(vec3<f32>(), vec3<f32>(), DST_MAX, vec4f(0.));
 }
 

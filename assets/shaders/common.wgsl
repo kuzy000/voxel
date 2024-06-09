@@ -7,6 +7,7 @@ struct RayMarchResult {
     normal: vec3f,
     color: vec3f,
     distance: f32,
+    color_debug: vec4f,
 }
 
 struct Intersection {

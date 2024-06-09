@@ -84,7 +84,7 @@ fn trace(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
     if (!is_inside(pos, vec3f(0.), vec3f(VOXEL_SIZES[0]))) {
         let intersection = ray_bbox(pos, dir, vec3f(0.), vec3f(VOXEL_SIZES[0u]));
         if (!intersection.has) {
-            return RayMarchResult(vec3<f32>(), vec3<f32>(), DST_MAX);
+            return RayMarchResult(vec3<f32>(), vec3<f32>(), DST_MAX, vec4(0.));
         }
         inter_t = intersection.t;
     }
@@ -164,7 +164,8 @@ fn trace(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
     let ipos_const = vec3i(1. - sign_dir01) * (VOXEL_DIM - 1);
 
     var distance = 0.;
-    for (var i = 0; i < MAX_STEPS; i++) {
+    var i = 0;
+    for (i = 0; i < MAX_STEPS; i++) {
         var ipos = frames[depth].ipos;
         if (ipos.x < 0 || ipos.x >= VOXEL_DIM || ipos.y < 0 || ipos.y >= VOXEL_DIM || ipos.z < 0 || ipos.z >= VOXEL_DIM) {
             if (depth == 0) {
@@ -208,7 +209,8 @@ fn trace(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
                     voxel_size *= f32(VOXEL_DIM);
                 }
                 
-                return RayMarchResult(normal, color, distance + inter_t);
+                let debug_alpha = 1. - pow(0.99, f32(i));
+                return RayMarchResult(normal, color, distance + inter_t, vec4f(1., 1., 1., debug_alpha));
             }
         }
         else if (get_voxel_nodes(index, ipos)) {
@@ -271,5 +273,6 @@ fn trace(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
         frames[depth].ipos += vec3<i32>(mask) * istep;
     }
     
-    return RayMarchResult(vec3<f32>(), vec3<f32>(), DST_MAX);
+    let debug_alpha = 1. - pow(0.99, f32(i));
+    return RayMarchResult(vec3<f32>(), vec3<f32>(), DST_MAX, vec4f(1., 1., 1., debug_alpha));
 }

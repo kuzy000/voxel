@@ -25,7 +25,8 @@ fn draw(
     let vn = (v / vec3f(size - vec3i(1)));
     let color = pack4x8unorm(vec4(vn, 0.));
 
-    if (length(vn * 2. - 1.) < 1.) {
+    let len = length(vn * 2. - 1.);
+    if (len < 1. && len > .9) {
         vox::place(pos, color);
     }
 }
