@@ -25,76 +25,15 @@ use bevy::{
     },
     utils::info,
 };
+use gpu_buffer_allocator::{GpuBufferAllocator, GpuIdx};
 
 use crate::*;
 
 const WORKING_GROUP: IVec3 = IVec3::new(8, 8, 8);
-const DISPATCH_SIZE: IVec3 = IVec3::new(16, 16, 16);
+const DISPATCH_SIZE: IVec3 = IVec3::new(256, 256, 256);
+// const DISPATCH_SIZE: IVec3 = IVec3::new(16, 16, 16);
 
-pub struct GpuBufferAllocator<T>
-where
-    T: ShaderType + WriteInto,
-{
-    label: &'static str,
-    size: u64,
-    buffer: Buffer,
-    _phantom: PhantomData<T>,
-}
-
-impl<T> GpuBufferAllocator<T>
-where
-    T: ShaderType + WriteInto,
-{
-    pub fn new(label: &'static str, size: u64, device: &RenderDevice) -> Self {
-        Self {
-            label,
-            size,
-            buffer: device.create_buffer(&BufferDescriptor {
-                label: Some(label),
-                size: (size * u64::from(T::min_size())).into(),
-                usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
-                mapped_at_creation: false,
-            }),
-            _phantom: PhantomData,
-        }
-    }
-
-    pub fn write(&mut self, offset: u64, data: &[T], device: &RenderDevice, queue: &RenderQueue) {
-        assert!((offset + data.len() as u64) <= self.size);
-
-        let offset = u64::from(T::min_size()) * offset;
-        let size = u64::from(T::min_size()) * (data.len() as u64);
-
-        let mut buffer_view = queue
-            .write_buffer_with(&self.buffer, offset, size.try_into().unwrap())
-            .unwrap();
-
-        let mut offset = 0usize;
-        for v in data {
-            v.write_into(&mut Writer::new(&v, &mut *buffer_view, offset).unwrap());
-
-            offset += u64::from(T::min_size()) as usize;
-        }
-
-        assert_eq!(offset, size as usize);
-    }
-
-    pub fn buffer(&self) -> &Buffer {
-        &self.buffer
-    }
-
-    pub fn binding(&self) -> BindingResource<'_> {
-        self.buffer.as_entire_binding()
-    }
-
-    pub fn size_bytes(&self) -> u64 {
-        self.size * u64::from(T::min_size())
-    }
-
-    pub fn size(&self) -> u64 {
-        self.size
-    }
-}
+const DRAW_SIZE: IVec3 = IVec3::new(128, 128, 128);
 
 #[derive(Debug, Clone, Copy, ShaderType)]
 pub struct VoxelGpuSceneInfo {
@@ -118,9 +57,10 @@ pub struct VoxelGpuScene {
 impl FromWorld for VoxelGpuScene {
     fn from_world(world: &mut World) -> Self {
         let device = world.resource::<RenderDevice>();
+        let queue = world.resource::<RenderQueue>();
 
-        let bytes_nodes = 64 * 1024 * 1024; // 64MiB
-        let bytes_leafs = 512 * 1024 * 1024; // 512MiB
+        let bytes_nodes = 256 * 1024 * 1024; // 256MiB
+        let bytes_leafs = 2 * 1024 * 1024 * 1024; // 2GiB
 
         let num_nodes = bytes_nodes / std::mem::size_of::<VoxelNode>();
         let num_leafs = bytes_leafs / std::mem::size_of::<VoxelLeaf>();
@@ -130,8 +70,8 @@ impl FromWorld for VoxelGpuScene {
             bytes_nodes, bytes_leafs,
         );
 
-        let nodes = GpuBufferAllocator::new("voxel_nodes_buffer", num_nodes as u64, device);
-        let leafs = GpuBufferAllocator::new("voxel_leafs_buffer", num_leafs as u64, device);
+        let nodes = GpuBufferAllocator::new("voxel_nodes_buffer", num_nodes as GpuIdx, Some(&default()), device, queue);
+        let leafs = GpuBufferAllocator::new("voxel_leafs_buffer", num_leafs as GpuIdx, Some(&default()), device, queue);
 
         let nodes_size = nodes.size_bytes().try_into().unwrap();
         let leafs_size = leafs.size_bytes().try_into().unwrap();
@@ -458,28 +398,22 @@ impl RenderAsset for GpuVoxelTree {
             let gn = gpu_scene.nodes.size();
             let gl = gpu_scene.leafs.size();
 
-            let sn = source_asset.nodes.len() as u64;
-            let sl = source_asset.leafs.len() as u64;
+            let sn = source_asset.nodes.len() as GpuIdx;
+            let sl = source_asset.leafs.len() as GpuIdx;
 
             assert!(gn >= sn, "nodes {} >= {}", gn, sn);
             assert!(gl >= sl, "leafs {} >= {}", gl, sl);
         }
-
-        {
-            let nodes = vec![VoxelNode::default(); gpu_scene.nodes.size() as usize];
-            gpu_scene.nodes.write(0, nodes.as_slice(), device, queue);
-        }
-        {
-            let leafs = vec![VoxelLeaf::default(); gpu_scene.leafs.size() as usize];
-            gpu_scene.leafs.write(0, leafs.as_slice(), device, queue);
+        
+        for node in &source_asset.nodes {
+            let idx = gpu_scene.nodes.alloc();
+            gpu_scene.nodes.write(idx, node, queue);
         }
 
-        gpu_scene
-            .nodes
-            .write(0, source_asset.nodes.as_slice(), device, queue);
-        gpu_scene
-            .leafs
-            .write(0, source_asset.leafs.as_slice(), device, queue);
+        for leaf in &source_asset.leafs {
+            let idx = gpu_scene.leafs.alloc();
+            gpu_scene.leafs.write(idx, leaf, queue);
+        }
 
         gpu_scene.info.get_mut().nodes_len = source_asset.nodes.len() as u32;
         gpu_scene.info.get_mut().leafs_len = source_asset.leafs.len() as u32;
@@ -530,9 +464,9 @@ impl render_graph::Node for VoxelDrawNode {
             }
             VoxelDrawState::Done => {
                 match pipeline_cache.get_compute_pipeline_state(voxel_pipelines.draw) {
-                    CachedPipelineState::Ok(_) => {
-                        self.state = VoxelDrawState::Loading;
-                    }
+                    // CachedPipelineState::Ok(_) => {
+                    //     self.state = VoxelDrawState::Loading;
+                    // }
                     _ => (),
                 }
             }

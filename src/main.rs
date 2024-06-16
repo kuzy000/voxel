@@ -46,9 +46,12 @@ mod math;
 mod render;
 mod ui;
 mod voxel_tree;
+mod gpu_buffer_allocator;
+mod gpu_rw_buffer;
 
-fn main() {
-    color_backtrace::install();
+fn main() -> color_eyre::eyre::Result<()> {
+    color_eyre::install()?;
+
     let mut app = App::new();
     app.insert_resource(ClearColor(Color::BLACK))
         .insert_resource(Msaa::Off)
@@ -91,6 +94,8 @@ fn main() {
     fs::write("render_schedule.graph", render_schedule);
 
     app.run();
+    
+    Ok(())
 }
 
 fn setup(
