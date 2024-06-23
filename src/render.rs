@@ -516,7 +516,7 @@ impl render_graph::Node for VoxelDrawNode {
         pass.set_bind_group(0, &voxel_bind_group.0, &[]);
 
         let world_min = UVec3::new(10, 10, 10);
-        let world_max = UVec3::new(100, 100, 100);
+        let world_max = UVec3::new(1000, 1000, 1000);
 
         for depth in 0..VOXEL_TREE_DEPTH {
             let size = (VOXEL_DIM as u32).pow((VOXEL_TREE_DEPTH - 1 - depth) as u32);

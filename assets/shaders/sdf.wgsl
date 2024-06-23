@@ -26,11 +26,19 @@ fn sdf_world(p: vec3<f32>) -> f32 {
 
     var res: f32 = DST_MAX;
 
-    res = min(res, sdf_sphere(p, 0.5));
-    res = min(res, sdf_box(p - vec3(3., 0., 0.), vec3f(1.)));
-    res = min(res, sdf_box(p - vec3(0., 3., 0.), vec3f(1.)));
-    res = min(res, sdf_box(p - vec3(0., 0., 3.), vec3f(1.)));
+    // res = min(res, sdf_sphere(p, 0.5));
+    // res = min(res, sdf_box(p - vec3(3., 0., 0.), vec3f(1.)));
+    // res = min(res, sdf_box(p - vec3(0., 3., 0.), vec3f(1.)));
+    // res = min(res, sdf_box(p - vec3(0., 0., 3.), vec3f(1.)));
     
+    let sp0 = sdf_sphere(p - vec3f(500.), 390.f);
+    let sp1 = sdf_sphere(p - vec3f(500.), 400.f);
+    
+    let sp = max(-sp0, sp1); // difference
+
+    res = min(res, sp);
+    
+    //res = min(res, sdf_sphere(p - vec3f(50.), 30.f));
 
     return res;
 }

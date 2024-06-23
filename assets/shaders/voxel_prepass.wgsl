@@ -45,12 +45,12 @@ fn fragment(in: FullscreenVertexOutput) -> FragmentOutputWithDepth {
     let res_vox = vox::trace(pos, dir);
 
     var res: RayMarchResult;
-    if (res_sdf.distance < res_vox.distance) {
-        res = res_sdf;
-    }
-    else {
+    // if (res_sdf.distance < res_vox.distance) {
+    //     res = res_sdf;
+    // }
+    // else {
         res = res_vox;
-    }
+    //}
     
     //if (res.distance >= DST_MAX) {
     //    discard;
