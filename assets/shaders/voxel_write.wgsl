@@ -41,7 +41,16 @@ struct VoxelNode {
 @group(0) @binding(1) var<storage, read_write> nodes: array<VoxelNode>;
 @group(0) @binding(2) var<storage, read_write> leafs: array<VoxelLeaf>;
 
-fn place(pos: vec3i, data: u32) {
+struct PushConstants {
+    min: vec4i, // including
+    max: vec4i, // excluding
+    depth: u32,
+}
+
+var <push_constant> push_constants: PushConstants;
+
+
+fn place_old(pos: vec3i, data: u32) {
     var parent_idx = 0u;
     var voxel_size = i32(VOXEL_SIZES[1]);
 
@@ -120,4 +129,67 @@ fn place(pos: vec3i, data: u32) {
     let lpos = pos % vec3i(VOXEL_DIM);
     let idx = pos_to_idx(lpos);
     leafs[parent_idx].voxels[idx].color = data;
+}
+
+fn place(pos: vec3i, data: u32) {
+    var parent_idx = 0u;
+    // var voxel_size = i32(VOXEL_SIZES[u32(VOXEL_TREE_DEPTH) - push_constants.depth]);
+    var voxel_size = VOXEL_SIZE * f32(pow(f32(VOXEL_DIM), f32(u32(VOXEL_TREE_DEPTH) - (u32(VOXEL_TREE_DEPTH) - push_constants.depth))));
+
+    for (var depth = 0u; depth < min(u32(VOXEL_TREE_DEPTH - 2), push_constants.depth + 1); depth++) {
+        let lpos = (pos / vec3i(voxel_size)) % vec3i(VOXEL_DIM);
+
+        let idx = pos_to_idx(lpos);
+        let p = &nodes[parent_idx].indices[idx];
+
+        var child_idx = 0u;
+        if (*p == VOXEL_IDX_EMPTY) {
+            if (depth != push_constants.depth) {
+                return;
+            }
+
+            // Allocate new chunk
+            let new_idx = atomicAdd(&info.nodes_len, 1u);
+            if new_idx >= info.nodes_cap {
+                return;
+            }
+            
+            *p = new_idx;
+        }
+        child_idx = *p;
+
+        parent_idx = child_idx;
+        voxel_size = voxel_size / f32(VOXEL_DIM);
+    }
+
+    if (push_constants.depth >= u32(VOXEL_TREE_DEPTH - 2)) {
+        let lpos = (pos / vec3i(voxel_size)) % vec3i(VOXEL_DIM);
+        let idx = pos_to_idx(lpos);
+        let p = &nodes[parent_idx].indices[idx];
+
+        var child_idx = 0u;
+        if (*p == VOXEL_IDX_EMPTY) {
+            if (u32(VOXEL_TREE_DEPTH - 2) != push_constants.depth) {
+                return;
+            }
+
+            // Allocate new chunk
+            let new_idx = atomicAdd(&info.leafs_len, 1u);
+            if new_idx >= info.leafs_cap {
+                return;
+            }
+
+            *p = new_idx;
+        }
+        child_idx = *p;
+
+        parent_idx = child_idx;
+        voxel_size = voxel_size / f32(VOXEL_DIM);
+    }
+
+    if (push_constants.depth == u32(VOXEL_TREE_DEPTH - 1)) {
+        let lpos = pos % vec3i(VOXEL_DIM);
+        let idx = pos_to_idx(lpos);
+        leafs[parent_idx].voxels[idx].color = data;
+    }
 }

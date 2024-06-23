@@ -29,11 +29,7 @@ use gpu_buffer_allocator::{GpuBufferAllocator, GpuIdx};
 
 use crate::*;
 
-const WORKING_GROUP: IVec3 = IVec3::new(8, 8, 8);
-const DISPATCH_SIZE: IVec3 = IVec3::new(256, 256, 256);
-// const DISPATCH_SIZE: IVec3 = IVec3::new(16, 16, 16);
-
-const DRAW_SIZE: IVec3 = IVec3::new(128, 128, 128);
+const WORKGROUP_SIZE: UVec3 = UVec3::new(8, 8, 8);
 
 #[derive(Debug, Clone, Copy, ShaderType)]
 pub struct VoxelGpuSceneInfo {
@@ -70,8 +66,20 @@ impl FromWorld for VoxelGpuScene {
             bytes_nodes, bytes_leafs,
         );
 
-        let nodes = GpuBufferAllocator::new("voxel_nodes_buffer", num_nodes as GpuIdx, Some(&default()), device, queue);
-        let leafs = GpuBufferAllocator::new("voxel_leafs_buffer", num_leafs as GpuIdx, Some(&default()), device, queue);
+        let nodes = GpuBufferAllocator::new(
+            "voxel_nodes_buffer",
+            num_nodes as GpuIdx,
+            Some(&default()),
+            device,
+            queue,
+        );
+        let leafs = GpuBufferAllocator::new(
+            "voxel_leafs_buffer",
+            num_leafs as GpuIdx,
+            Some(&default()),
+            device,
+            queue,
+        );
 
         let nodes_size = nodes.size_bytes().try_into().unwrap();
         let leafs_size = leafs.size_bytes().try_into().unwrap();
@@ -135,9 +143,9 @@ impl FromWorld for VoxelPipelines {
         let shader_defs_compute = [
             shader_defs.as_slice(),
             &[
-                ShaderDefVal::UInt("WG_X".into(), WORKING_GROUP.x as u32),
-                ShaderDefVal::UInt("WG_Y".into(), WORKING_GROUP.y as u32),
-                ShaderDefVal::UInt("WG_Z".into(), WORKING_GROUP.z as u32),
+                ShaderDefVal::UInt("WG_X".into(), WORKGROUP_SIZE.x),
+                ShaderDefVal::UInt("WG_Y".into(), WORKGROUP_SIZE.y),
+                ShaderDefVal::UInt("WG_Z".into(), WORKGROUP_SIZE.z),
             ],
         ]
         .concat();
@@ -197,7 +205,10 @@ impl FromWorld for VoxelPipelines {
             draw: pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
                 label: Some("voxel_draw_pipeline".into()),
                 layout: vec![voxel_layout.clone()],
-                push_constant_ranges: Vec::new(),
+                push_constant_ranges: vec![PushConstantRange {
+                    stages: ShaderStages::COMPUTE,
+                    range: 0..(4 * 4 * 3), // min: vec3i, max: vec3i, depth: u32
+                }],
                 shader: shader_draw,
                 shader_defs: shader_defs_compute.clone(),
                 entry_point: "draw".into(),
@@ -404,7 +415,7 @@ impl RenderAsset for GpuVoxelTree {
             assert!(gn >= sn, "nodes {} >= {}", gn, sn);
             assert!(gl >= sl, "leafs {} >= {}", gl, sl);
         }
-        
+
         for node in &source_asset.nodes {
             let idx = gpu_scene.nodes.alloc();
             gpu_scene.nodes.write(idx, node, queue);
@@ -504,11 +515,35 @@ impl render_graph::Node for VoxelDrawNode {
 
         pass.set_bind_group(0, &voxel_bind_group.0, &[]);
 
-        let x = DISPATCH_SIZE.x.try_into().unwrap();
-        let y = DISPATCH_SIZE.y.try_into().unwrap();
-        let z = DISPATCH_SIZE.z.try_into().unwrap();
+        let world_min = UVec3::new(10, 10, 10);
+        let world_max = UVec3::new(100, 100, 100);
 
-        pass.dispatch_workgroups(x, y, z);
+        for depth in 0..VOXEL_TREE_DEPTH {
+            let size = (VOXEL_DIM as u32).pow((VOXEL_TREE_DEPTH - 1 - depth) as u32);
+            let min = world_min / size;
+            let max = (world_max - UVec3::ONE) / size + UVec3::ONE;
+
+            pass.set_push_constants(4 * 0, &(min.x as i32).to_ne_bytes());
+            pass.set_push_constants(4 * 1, &(min.y as i32).to_ne_bytes());
+            pass.set_push_constants(4 * 2, &(min.z as i32).to_ne_bytes());
+            pass.set_push_constants(4 * 3, &(0 as i32).to_ne_bytes());
+
+            pass.set_push_constants(4 * 4, &(max.x as i32).to_ne_bytes());
+            pass.set_push_constants(4 * 5, &(max.y as i32).to_ne_bytes());
+            pass.set_push_constants(4 * 6, &(max.z as i32).to_ne_bytes());
+            pass.set_push_constants(4 * 7, &(0 as i32).to_ne_bytes());
+
+            pass.set_push_constants(4 * 8, &(depth as u32).to_ne_bytes());
+
+            let dispatch_size =
+                ((max - min + WORKGROUP_SIZE - UVec3::splat(1)) / WORKGROUP_SIZE).max(UVec3::ONE);
+
+            info!(
+                "Draw; depth: {}, min: {}, max: {}, dispatch: {}",
+                depth, min, max, dispatch_size
+            );
+            pass.dispatch_workgroups(dispatch_size.x, dispatch_size.y, dispatch_size.z);
+        }
 
         Ok(())
     }

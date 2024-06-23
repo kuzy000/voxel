@@ -57,7 +57,9 @@ fn fragment(in: FullscreenVertexOutput) -> FragmentOutputWithDepth {
     //}
     
     //let color = res.normal + 1. * 0.5; 
-    let color = res.color * (dot(res.normal, normalize(vec3f(1., 1., 1.,))) * .5 + .5) + (res.color_debug.xyz) * res.color_debug.w;
+    var color = res.color * (dot(res.normal, normalize(vec3f(1., 1., 1.,))) * .5 + .5);
+    // color = res.normal * 0.5 + 0.5;
+    color += (res.color_debug.xyz) * res.color_debug.w;
 
     var pbr_input = pbr_input_new();
     
