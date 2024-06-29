@@ -193,3 +193,27 @@ fn place(pos: vec3i, data: u32) {
         leafs[parent_idx].voxels[idx].color = data;
     }
 }
+
+fn clear_nodes(idx: u32) {
+    for (var i = 0; i < VOXEL_COUNT; i++) {
+        nodes[idx].indices[i] = VOXEL_IDX_EMPTY;
+    }
+}
+
+fn clear_leafs(idx: u32) {
+    for (var i = 0; i < VOXEL_COUNT; i++) {
+        leafs[idx].voxels[i].color = VOXEL_IDX_EMPTY;
+    }
+}
+
+fn clear(idx: u32) {
+    atomicStore(&info.nodes_len, 1u);
+    atomicStore(&info.leafs_len, 0u);
+
+    if (idx < info.leafs_cap) {
+        clear_leafs(idx);
+    }
+    else if (idx - info.leafs_cap < info.nodes_cap) {  
+        clear_nodes(idx - info.leafs_cap);
+    }
+}

@@ -112,13 +112,13 @@ fn setup(
     //gen_test_scene(&mut voxel_tree, 4i32.pow(DEPTH as u32), Vec3::new(1., 0.5, 1.));
 
     // let model_path = "assets/Church_Of_St_Sophia.vox";
-    let model_path = "assets/monu2.vox";
+    // let model_path = "assets/monu2.vox";
 
-    let vox_model = dot_vox::load(model_path).expect("Failed to load");
+    // let vox_model = dot_vox::load(model_path).expect("Failed to load");
     // place_vox(&mut voxel_tree, &vox_model, IVec3::new(2000, 50, 2000));
-    place_vox(&mut voxel_tree, &vox_model, IVec3::new(200, 50, 200));
+    // place_vox(&mut voxel_tree, &vox_model, IVec3::new(200, 50, 200));
 
-    std::mem::forget(voxel_trees.add(voxel_tree));
+    // std::mem::forget(voxel_trees.add(voxel_tree));
 
     // gltf
     commands.spawn(SceneBundle {

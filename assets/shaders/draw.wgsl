@@ -11,6 +11,15 @@
 #import voxel_tracer::voxel_write as vox
 
 @compute @workgroup_size(#{WG_X}, #{WG_Y}, #{WG_Z})
+fn clear_world(
+    @builtin(global_invocation_id) invocation_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>
+) {
+    let idx = invocation_id.x * #{WG_Y} * #{WG_Z} + invocation_id.y * #{WG_Y} + invocation_id.z;
+    vox::clear(idx);
+}
+
+@compute @workgroup_size(#{WG_X}, #{WG_Y}, #{WG_Z})
 fn draw(
     @builtin(global_invocation_id) invocation_id: vec3<u32>,
     @builtin(num_workgroups) num_workgroups: vec3<u32>
@@ -29,13 +38,35 @@ fn draw(
     
     let voxel_size = VOXEL_SIZE * f32(pow(f32(VOXEL_DIM), f32(u32(VOXEL_TREE_DEPTH - 1) - depth)));
     
-    let p = (vec3f(ipos) + vec3f(.5)) * voxel_size;
-    let d = sdf::sdf_world(p);
-    let voxel_box = sdf::sdf_box(vec3f(0.), vec3f(voxel_size));
+    let vmin = vec3f(ipos) * voxel_size;
+    let vmax = vec3f(ipos + vec3i(1)) * voxel_size;
     
-    let r = max(voxel_box, d);
+    let center = vec3f(50, 50, 50);
+    let radius = 20.f;
     
-    if (r < sqrt(2.) * voxel_size) {
-        vox::place(ipos, color);
+    var smin = center - vmin;
+    var smax = center - vmax;
+    smin *= smin;
+    smax *= smax;
+    
+    let tmin = vec3f(center < vmin) * smin;
+    let tmax = vec3f(center > vmax) * smax;
+    
+    var ds = radius * radius;
+    ds -= tmin.x + tmin.y + tmin.z;
+    ds -= tmax.x + tmax.y + tmax.z;
+    
+    if (ds > 0.) {
+       vox::place(ipos, color);
     }
+    
+//    let p = (vec3f(ipos) + vec3f(.5)) * voxel_size;
+//    let d = sdf::sdf_world(p);
+//    let voxel_box = sdf::sdf_box(vec3f(0.), vec3f(voxel_size));
+//    
+//    let r = max(voxel_box, d);
+//    
+//    if (r <= sqrt(2.) * voxel_size * .6f) {
+//        vox::place(ipos, color);
+//    }
 }
