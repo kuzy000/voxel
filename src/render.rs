@@ -211,7 +211,7 @@ impl FromWorld for VoxelPipelines {
                 layout: vec![voxel_layout.clone()],
                 push_constant_ranges: vec![PushConstantRange {
                     stages: ShaderStages::COMPUTE,
-                    range: 0..(4 * 4 * 3), // min: vec3i, max: vec3i, depth: u32
+                    range: 0..(4 * 4 * 5), // min: vec3i, max: vec3i, world_min: vec3i, world_max: vec3i, depth: u32
                 }],
                 shader: shader_draw.clone(),
                 shader_defs: shader_defs_compute.clone(),
@@ -476,9 +476,21 @@ impl render_graph::Node for VoxelDrawNode {
 
         match self.state {
             VoxelDrawState::Loading => {
+                let mut ready = 0;
+
                 if let CachedPipelineState::Ok(_) =
                     pipeline_cache.get_compute_pipeline_state(voxel_pipelines.draw)
                 {
+                    ready += 1;
+                }
+
+                if let CachedPipelineState::Ok(_) =
+                    pipeline_cache.get_compute_pipeline_state(voxel_pipelines.clear_world)
+                {
+                    ready += 1;
+                }
+
+                if ready == 2 {
                     self.state = VoxelDrawState::Run;
                 }
             }
@@ -486,9 +498,22 @@ impl render_graph::Node for VoxelDrawNode {
                 self.state = VoxelDrawState::Done;
             }
             VoxelDrawState::Done => {
-                match pipeline_cache.get_compute_pipeline_state(voxel_pipelines.draw) {
-                    CachedPipelineState::Ok(_) => (),
-                    _ => self.state = VoxelDrawState::Loading,
+                let mut ready = 0;
+
+                if let CachedPipelineState::Ok(_) =
+                    pipeline_cache.get_compute_pipeline_state(voxel_pipelines.draw)
+                {
+                    ready += 1;
+                }
+
+                if let CachedPipelineState::Ok(_) =
+                    pipeline_cache.get_compute_pipeline_state(voxel_pipelines.clear_world)
+                {
+                    ready += 1;
+                }
+
+                if ready != 2 {
+                    self.state = VoxelDrawState::Loading;
                 }
             }
         }
@@ -557,8 +582,8 @@ impl render_graph::Node for VoxelDrawNode {
 
             pass.set_bind_group(0, &voxel_bind_group.0, &[]);
 
-            let world_min = UVec3::new(10, 10, 10);
-            let world_max = UVec3::new(1000, 1000, 1000);
+            let world_min = UVec3::new(0, 0, 0);
+            let world_max = UVec3::new(512, 512, 512);
 
             for depth in 0..VOXEL_TREE_DEPTH {
                 let size = (VOXEL_DIM as u32).pow((VOXEL_TREE_DEPTH - 1 - depth) as u32);
@@ -575,7 +600,17 @@ impl render_graph::Node for VoxelDrawNode {
                 pass.set_push_constants(4 * 6, &(max.z as i32).to_ne_bytes());
                 pass.set_push_constants(4 * 7, &(0 as i32).to_ne_bytes());
 
-                pass.set_push_constants(4 * 8, &(depth as u32).to_ne_bytes());
+                pass.set_push_constants(4 * 8, &(world_min.x as i32).to_ne_bytes());
+                pass.set_push_constants(4 * 9, &(world_min.y as i32).to_ne_bytes());
+                pass.set_push_constants(4 * 10, &(world_min.z as i32).to_ne_bytes());
+                pass.set_push_constants(4 * 11, &(0 as i32).to_ne_bytes());
+
+                pass.set_push_constants(4 * 12, &(world_max.x as i32).to_ne_bytes());
+                pass.set_push_constants(4 * 13, &(world_max.y as i32).to_ne_bytes());
+                pass.set_push_constants(4 * 14, &(world_max.z as i32).to_ne_bytes());
+                pass.set_push_constants(4 * 15, &(0 as i32).to_ne_bytes());
+
+                pass.set_push_constants(4 * 16, &(depth as u32).to_ne_bytes());
 
                 let dispatch_size = ((max - min + WORKGROUP_SIZE - UVec3::splat(1))
                     / WORKGROUP_SIZE)

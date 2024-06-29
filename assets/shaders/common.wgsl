@@ -59,3 +59,100 @@ fn is_inside(pos: vec3f, a: vec3f, b: vec3f) -> bool {
     
     return true;
 }
+
+// https://www.shadertoy.com/view/NlSGDz
+// MurmurHash
+fn hash(x: u32, seed: u32) -> u32 {
+    let m = 0x5bd1e995u;
+    var hash = seed;
+    // process input
+    var k = x;
+    k *= m;
+    k ^= k >> 24;
+    k *= m;
+    hash *= m;
+    hash ^= k;
+    // some final mixing
+    hash ^= hash >> 13;
+    hash *= m;
+    hash ^= hash >> 15;
+    return hash;
+}
+
+// https://www.shadertoy.com/view/NlSGDz
+// MurmurHash
+fn hash2(x: vec2u, seed: u32) -> u32 {
+    let m = 0x5bd1e995u;
+    var hash = seed;
+    // process first vector element
+    var k = x.x; 
+    k *= m;
+    k ^= k >> 24;
+    k *= m;
+    hash *= m;
+    hash ^= k;
+    // process second vector element
+    k = x.y; 
+    k *= m;
+    k ^= k >> 24;
+    k *= m;
+    hash *= m;
+    hash ^= k;
+	// some final mixing
+    hash ^= hash >> 13;
+    hash *= m;
+    hash ^= hash >> 15;
+    return hash;
+}
+
+// https://www.shadertoy.com/view/NlSGDz
+fn random_dir2(hash: u32) -> vec2f {
+    switch (i32(hash) & 3) { // look at the last two bits to pick a gradient direction
+        case 0: {
+            return vec2f(1.0, 1.0);
+        }
+        case 1: {
+            return vec2f(-1.0, 1.0);
+        }
+        case 2: {
+            return vec2f(1.0, -1.0);
+        }
+        case 3, default: {
+            return vec2f(-1.0, -1.0);
+        }
+    }
+}
+
+// https://www.shadertoy.com/view/NlSGDz
+fn perlin_noise_octave(position: vec2f, seed: u32) -> f32 {
+    let floorPosition = floor(position);
+    let fractPosition = position - floorPosition;
+    let cellCoordinates = vec2u(floorPosition);
+
+    let value1 = dot(random_dir2(hash2(cellCoordinates, seed)), fractPosition);
+    let value2 = dot(random_dir2(hash2((cellCoordinates + vec2u(1u, 0u)), seed)), fractPosition - vec2f(1.0, 0.0));
+    let value3 = dot(random_dir2(hash2((cellCoordinates + vec2u(0u, 1u)), seed)), fractPosition - vec2f(0.0, 1.0));
+    let value4 = dot(random_dir2(hash2((cellCoordinates + vec2u(1u, 1u)), seed)), fractPosition - vec2f(1.0, 1.0));
+
+    // 6t^5 - 15t^4 + 10t^3
+    var t = fractPosition;
+    t = t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+
+    return mix(mix(value1, value2, t.x), mix(value3, value4, t.x), t.y);
+}
+
+
+// https://www.shadertoy.com/view/NlSGDz
+fn perlin_noise(position: vec2f, frequency: f32, octaveCount: i32, persistence: f32, lacunarity: f32, seed: u32) -> f32 {
+    var value = 0.0;
+    var amplitude = 1.0;
+    var currentFrequency = frequency;
+    var currentSeed = seed;
+    for (var i = 0; i < octaveCount; i++) {
+        currentSeed = hash(currentSeed, 0u); // create a new seed for each octave
+        value += perlin_noise_octave(position * currentFrequency, currentSeed) * amplitude;
+        amplitude *= persistence;
+        currentFrequency *= lacunarity;
+    }
+    return value;
+}

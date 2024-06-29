@@ -44,6 +44,8 @@ struct VoxelNode {
 struct PushConstants {
     min: vec4i, // including
     max: vec4i, // excluding
+    world_min: vec4i, // including
+    world_max: vec4i, // excluding
     depth: u32,
 }
 
