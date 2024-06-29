@@ -11,7 +11,6 @@ use bevy::{
         renderer::{RenderDevice, RenderQueue},
     },
 };
-use color_eyre::owo_colors::OwoColorize;
 
 pub type GpuIdx = u32;
 

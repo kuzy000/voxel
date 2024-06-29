@@ -22,7 +22,7 @@ struct FragmentOutputWithDepth {
 }
 
 fn view_z_to_depth_ndc(view_z: f32) -> f32 {
-    let ndc_pos = view.projection * vec4(0.0, 0.0, view_z, 1.0);
+    let ndc_pos = view.clip_from_view * vec4(0.0, 0.0, view_z, 1.0);
     return ndc_pos.z / ndc_pos.w;
 }
 
@@ -31,13 +31,12 @@ fn fragment(in: FullscreenVertexOutput) -> FragmentOutputWithDepth {
     var ndc = in.uv * 2. - 1.;
     ndc.y = -ndc.y;
     
-    var dir_eye = view.inverse_projection * vec4(ndc, -1., 1.);
+    var dir_eye = view.view_from_clip * vec4(ndc, -1., 1.);
     dir_eye.w = 0.;
 
-    // bevy's `view.view` is actually inversed view (and vice versa)
-    let dir_w = (view.view * dir_eye).xyz;
+    let dir_w = (view.world_from_view * dir_eye).xyz;
  
-    let pos4 = view.view * vec4f(0.f, 0.f, 0.f, 1.f);
+    let pos4 = view.world_from_view * vec4f(0.f, 0.f, 0.f, 1.f);
     let pos = pos4.xyz / pos4.w;
     let dir = normalize(dir_w);
     // let res_vox = ray_march_voxel(pos, dir);

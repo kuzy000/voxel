@@ -41,17 +41,15 @@ use render::*;
 use voxel_tree::*;
 
 mod camera;
+mod gpu_buffer_allocator;
+mod gpu_rw_buffer;
 mod import;
 mod math;
 mod render;
 mod ui;
 mod voxel_tree;
-mod gpu_buffer_allocator;
-mod gpu_rw_buffer;
 
-fn main() -> color_eyre::eyre::Result<()> {
-    color_eyre::install()?;
-
+fn main() {
     let mut app = App::new();
     app.insert_resource(ClearColor(Color::BLACK))
         .insert_resource(Msaa::Off)
@@ -86,16 +84,14 @@ fn main() -> color_eyre::eyre::Result<()> {
         .add_systems(Update, update_game_camera)
         .add_systems(Update, update_gizmos);
 
-    let render_graph = bevy_mod_debugdump::render_graph_dot(&app, &default());
-    fs::write("render_graph.graph", render_graph);
+    // let render_graph = bevy_mod_debugdump::render_graph_dot(&app, &default());
+    // fs::write("render_graph.graph", render_graph);
 
-    let render_schedule =
-        bevy_mod_debugdump::schedule_graph_dot(app.sub_app_mut(RenderApp), Render, &default());
-    fs::write("render_schedule.graph", render_schedule);
+    // let render_schedule =
+    //     bevy_mod_debugdump::schedule_graph_dot(app.sub_app_mut(RenderApp), Render, &default());
+    // fs::write("render_schedule.graph", render_schedule);
 
     app.run();
-    
-    Ok(())
 }
 
 fn setup(
