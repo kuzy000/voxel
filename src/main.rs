@@ -178,6 +178,7 @@ impl Plugin for VoxelTracerPlugin {
         app.add_plugins(EntityCountDiagnosticsPlugin::default());
         app.add_plugins(SystemInformationDiagnosticsPlugin::default());
         app.add_plugins(CameraDiagnosticsPlugin::default());
+        app.add_plugins(VoxelWorldDiagnosticsPlugin::default());
         app.init_asset::<VoxelTree>();
         let render_app = app.sub_app_mut(RenderApp);
 
@@ -188,6 +189,7 @@ impl Plugin for VoxelTracerPlugin {
                 prepare_voxel_view_bind_groups
                     .in_set(RenderSet::PrepareBindGroups)
                     .after(prepare_voxel_bind_groups),
+                render_world_send.after(RenderSet::Render),
             ),
         );
 
@@ -211,9 +213,13 @@ impl Plugin for VoxelTracerPlugin {
     }
 
     fn finish(&self, app: &mut App) {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        app.insert_resource(MainWorldReceiver(rx));
+
         let render_app = app.sub_app_mut(RenderApp);
         render_app.init_resource::<VoxelGpuScene>();
         render_app.init_resource::<VoxelPipelines>();
+        render_app.insert_resource(RenderWorldSender(tx));
     }
 }
 

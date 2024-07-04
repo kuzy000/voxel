@@ -8,7 +8,7 @@ use bevy::{
         fullscreen_vertex_shader::fullscreen_shader_vertex_state,
         prepass::{ViewPrepassTextures, MOTION_VECTOR_PREPASS_FORMAT, NORMAL_PREPASS_FORMAT},
     },
-    diagnostic::DiagnosticsStore,
+    diagnostic::{Diagnostic, DiagnosticPath, Diagnostics, DiagnosticsStore, RegisterDiagnostic},
     ecs::{query::QueryItem, system::lifetimeless::SResMut},
     prelude::*,
     render::{
@@ -25,26 +25,99 @@ use bevy::{
     },
     utils::info,
 };
+use crossbeam_channel::{Receiver, Sender};
+use encase::internal::{ReadFrom, Reader};
 use gpu_buffer_allocator::{GpuBufferAllocator, GpuIdx};
 
 use crate::*;
 
 const WORKGROUP_SIZE: UVec3 = UVec3::new(8, 8, 8);
 
-#[derive(Debug, Clone, Copy, ShaderType)]
+#[derive(Debug, Clone, Copy, ShaderType, Default)]
 pub struct VoxelGpuSceneInfo {
-    nodes_len: u32,
     nodes_cap: u32,
+    nodes_len: u32,
+    nodes_free_count: u32,
 
-    leafs_len: u32,
     leafs_cap: u32,
+    leafs_len: u32,
+    leafs_free_count: u32,
+}
+
+#[derive(Resource, Deref)]
+pub struct MainWorldReceiver(pub Receiver<VoxelGpuSceneInfo>);
+
+#[derive(Resource, Deref)]
+pub struct RenderWorldSender(pub Sender<VoxelGpuSceneInfo>);
+
+#[derive(Default)]
+pub struct VoxelWorldDiagnosticsPlugin;
+
+impl Plugin for VoxelWorldDiagnosticsPlugin {
+    fn build(&self, app: &mut App) {
+        app.register_diagnostic(Diagnostic::new(Self::NODES).with_suffix("%"))
+            .add_systems(Update, Self::diagnostic_system);
+        app.register_diagnostic(Diagnostic::new(Self::NODES_CAP))
+            .add_systems(Update, Self::diagnostic_system);
+        app.register_diagnostic(Diagnostic::new(Self::NODES_LEN))
+            .add_systems(Update, Self::diagnostic_system);
+        app.register_diagnostic(Diagnostic::new(Self::NODES_FREE_COUNT))
+            .add_systems(Update, Self::diagnostic_system);
+
+        app.register_diagnostic(Diagnostic::new(Self::LEAFS).with_suffix("%"))
+            .add_systems(Update, Self::diagnostic_system);
+        app.register_diagnostic(Diagnostic::new(Self::LEAFS_CAP))
+            .add_systems(Update, Self::diagnostic_system);
+        app.register_diagnostic(Diagnostic::new(Self::LEAFS_LEN))
+            .add_systems(Update, Self::diagnostic_system);
+        app.register_diagnostic(Diagnostic::new(Self::LEAFS_FREE_COUNT))
+            .add_systems(Update, Self::diagnostic_system);
+    }
+}
+
+impl VoxelWorldDiagnosticsPlugin {
+    const NODES: DiagnosticPath = DiagnosticPath::const_new("voxel/nodes");
+    const NODES_CAP: DiagnosticPath = DiagnosticPath::const_new("voxel/nodes_cap");
+    const NODES_LEN: DiagnosticPath = DiagnosticPath::const_new("voxel/nodes_len");
+    const NODES_FREE_COUNT: DiagnosticPath = DiagnosticPath::const_new("voxel/nodes_free_count");
+
+    const LEAFS: DiagnosticPath = DiagnosticPath::const_new("voxel/leafs");
+    const LEAFS_CAP: DiagnosticPath = DiagnosticPath::const_new("voxel/leafs_cap");
+    const LEAFS_LEN: DiagnosticPath = DiagnosticPath::const_new("voxel/leafs_len");
+    const LEAFS_FREE_COUNT: DiagnosticPath = DiagnosticPath::const_new("voxel/leafs_free_count");
+
+    pub fn diagnostic_system(mut diagnostics: Diagnostics, receiver: Res<MainWorldReceiver>) {
+        while let Ok(data) = receiver.try_recv() {
+            let nodes_ratio =
+                (data.nodes_len - data.nodes_free_count) as f64 / data.nodes_cap as f64;
+            let leafs_ratio =
+                (data.leafs_len - data.leafs_free_count) as f64 / data.leafs_cap as f64;
+
+            diagnostics.add_measurement(&Self::NODES, || nodes_ratio * 100.);
+            diagnostics.add_measurement(&Self::NODES_CAP, || data.nodes_cap as f64);
+            diagnostics.add_measurement(&Self::NODES_LEN, || data.nodes_len as f64);
+            diagnostics.add_measurement(&Self::NODES_FREE_COUNT, || data.nodes_free_count as f64);
+
+            diagnostics.add_measurement(&Self::LEAFS, || leafs_ratio * 100.);
+            diagnostics.add_measurement(&Self::LEAFS_CAP, || data.leafs_cap as f64);
+            diagnostics.add_measurement(&Self::LEAFS_LEN, || data.leafs_len as f64);
+            diagnostics.add_measurement(&Self::LEAFS_FREE_COUNT, || data.leafs_free_count as f64);
+        }
+    }
 }
 
 #[derive(Resource)]
 pub struct VoxelGpuScene {
     pub info: StorageBuffer<VoxelGpuSceneInfo>,
+    pub info_copy_dest: Buffer,
+
     pub nodes: GpuBufferAllocator<VoxelNode>,
     pub leafs: GpuBufferAllocator<VoxelLeaf>,
+
+    pub free_nodes: Buffer,
+    pub free_leafs: Buffer,
+    pub draw_area_0: Buffer,
+    pub draw_area_1: Buffer,
 
     pub bind_group_layout_view: BindGroupLayout,
     pub bind_group_layout_voxel: BindGroupLayout,
@@ -57,6 +130,8 @@ impl FromWorld for VoxelGpuScene {
 
         let bytes_nodes = 256 * 1024 * 1024; // 256MiB
         let bytes_leafs = 2 * 1024 * 1024 * 1024; // 2GiB
+
+        let bytes_memlist: NonZeroU64 = (4 * 1024 * 1024).try_into().unwrap(); // 4MiB, can address 2GiB of chunks, 2048 bytes each
 
         let num_nodes = bytes_nodes / std::mem::size_of::<VoxelNode>();
         let num_leafs = bytes_leafs / std::mem::size_of::<VoxelLeaf>();
@@ -87,17 +162,61 @@ impl FromWorld for VoxelGpuScene {
         let mut info: StorageBuffer<_> = VoxelGpuSceneInfo {
             nodes_len: 1, // The first one is reserved for root node
             nodes_cap: nodes.size() as u32,
+            nodes_free_count: 0,
             leafs_len: 0,
             leafs_cap: leafs.size() as u32,
+            leafs_free_count: 0,
         }
         .into();
 
+        info.add_usages(BufferUsages::COPY_SRC);
+
         info.write_buffer(device, queue);
+
+        let mut info_copy_dest = device.create_buffer(&BufferDescriptor {
+            label: Some("voxel_info_copy_dest_buffer"),
+            size: VoxelGpuSceneInfo::SHADER_SIZE.into(),
+            usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let free_nodes = device.create_buffer(&BufferDescriptor {
+            label: Some("voxel_free_nodes_buffer"),
+            size: bytes_memlist.into(),
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let free_leafs = device.create_buffer(&BufferDescriptor {
+            label: Some("voxel_free_leafs_buffer"),
+            size: bytes_memlist.into(),
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let draw_area_0 = device.create_buffer(&BufferDescriptor {
+            label: Some("voxel_draw_area_0_buffer"),
+            size: bytes_memlist.into(),
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let draw_area_1 = device.create_buffer(&BufferDescriptor {
+            label: Some("voxel_draw_area_1_buffer"),
+            size: bytes_memlist.into(),
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
 
         Self {
             info,
+            info_copy_dest,
             nodes,
             leafs,
+            free_nodes,
+            free_leafs,
+            draw_area_0,
+            draw_area_1,
             bind_group_layout_view: device.create_bind_group_layout(
                 "voxel_view_bind_group_layout",
                 &BindGroupLayoutEntries::sequential(
@@ -113,6 +232,10 @@ impl FromWorld for VoxelGpuScene {
                         storage_buffer::<VoxelGpuSceneInfo>(false),
                         storage_buffer_sized(false, Some(nodes_size)),
                         storage_buffer_sized(false, Some(leafs_size)),
+                        storage_buffer_sized(false, Some(bytes_memlist)), // free_nodes
+                        storage_buffer_sized(false, Some(bytes_memlist)), // free_leafs
+                        storage_buffer_sized(false, Some(bytes_memlist)), // draw_area_0
+                        storage_buffer_sized(false, Some(bytes_memlist)), // draw_area_1
                     ),
                 ),
             ),
@@ -123,7 +246,8 @@ impl FromWorld for VoxelGpuScene {
 #[derive(Resource)]
 pub struct VoxelPipelines {
     prepass: CachedRenderPipelineId,
-    draw: CachedComputePipelineId,
+    draw_leafs: CachedComputePipelineId,
+    draw_nodes: CachedComputePipelineId,
     clear_world: CachedComputePipelineId,
 }
 
@@ -206,16 +330,27 @@ impl FromWorld for VoxelPipelines {
                     ],
                 }),
             }),
-            draw: pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
-                label: Some("voxel_draw_pipeline".into()),
+            draw_leafs: pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+                label: Some("voxel_draw_leafs_pipeline".into()),
                 layout: vec![voxel_layout.clone()],
                 push_constant_ranges: vec![PushConstantRange {
                     stages: ShaderStages::COMPUTE,
-                    range: 0..(4 * 4 * 5), // min: vec3i, max: vec3i, world_min: vec3i, world_max: vec3i, depth: u32
+                    range: 0..(4 * 4 * 6), // min: vec3i, max: vec3i, world_min: vec3i, world_max: vec3i, wsize_children: vec3i, depth: u32
                 }],
                 shader: shader_draw.clone(),
                 shader_defs: shader_defs_compute.clone(),
-                entry_point: "draw".into(),
+                entry_point: "draw_leafs".into(),
+            }),
+            draw_nodes: pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+                label: Some("voxel_draw_nodes_pipeline".into()),
+                layout: vec![voxel_layout.clone()],
+                push_constant_ranges: vec![PushConstantRange {
+                    stages: ShaderStages::COMPUTE,
+                    range: 0..(4 * 4 * 6), // min: vec3i, max: vec3i, world_min: vec3i, world_max: vec3i, wsize_children: vec3i, depth: u32
+                }],
+                shader: shader_draw.clone(),
+                shader_defs: shader_defs_compute.clone(),
+                entry_point: "draw_nodes".into(),
             }),
             clear_world: pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
                 label: Some("voxel_clear_world_pipeline".into()),
@@ -258,6 +393,30 @@ pub fn prepare_voxel_bind_groups(
         size: Some(gpu_scene.leafs.size_bytes().try_into().unwrap()),
     };
 
+    let free_nodes_binding = BufferBinding {
+        buffer: &gpu_scene.free_nodes,
+        offset: 0,
+        size: Some(gpu_scene.free_nodes.size().try_into().unwrap()),
+    };
+
+    let free_leafs_binding = BufferBinding {
+        buffer: &gpu_scene.free_leafs,
+        offset: 0,
+        size: Some(gpu_scene.free_leafs.size().try_into().unwrap()),
+    };
+
+    let draw_area_0_binding = BufferBinding {
+        buffer: &gpu_scene.draw_area_0,
+        offset: 0,
+        size: Some(gpu_scene.draw_area_0.size().try_into().unwrap()),
+    };
+
+    let draw_area_1_binding = BufferBinding {
+        buffer: &gpu_scene.draw_area_1,
+        offset: 0,
+        size: Some(gpu_scene.draw_area_1.size().try_into().unwrap()),
+    };
+
     let bind_group = device.create_bind_group(
         "voxel_bind_group",
         &gpu_scene.bind_group_layout_voxel,
@@ -265,6 +424,10 @@ pub fn prepare_voxel_bind_groups(
             info_uniforms.clone(),
             BindingResource::Buffer(nodes_binding.clone()),
             BindingResource::Buffer(leafs_binding.clone()),
+            BindingResource::Buffer(free_nodes_binding.clone()),
+            BindingResource::Buffer(free_leafs_binding.clone()),
+            BindingResource::Buffer(draw_area_0_binding.clone()),
+            BindingResource::Buffer(draw_area_1_binding.clone()),
         )),
     );
 
@@ -310,6 +473,35 @@ pub fn prepare_voxel_view_bind_groups(
             .entity(view_entity)
             .insert(VoxelViewBindGroups { view_bind_group });
     }
+}
+
+pub fn render_world_send(
+    device: Res<RenderDevice>,
+    voxel_scene: Res<VoxelGpuScene>,
+    sender: Res<RenderWorldSender>,
+) {
+    let buffer_slice = voxel_scene.info_copy_dest.slice(..);
+
+    let (tx, rx) = crossbeam_channel::unbounded::<()>();
+
+    buffer_slice.map_async(MapMode::Read, move |r| match r {
+        Ok(_) => tx.send(()).unwrap(),
+        Err(err) => panic!("Failed to map buffer: {err}"),
+    });
+
+    device.poll(Maintain::wait()).panic_on_timeout();
+
+    {
+        let buffer_view = buffer_slice.get_mapped_range();
+        let mut data = VoxelGpuSceneInfo { ..default() };
+        data.read_from(&mut Reader::new::<VoxelGpuSceneInfo>(&*buffer_view, 0).unwrap());
+
+        if let Err(err) = sender.send(data) {
+            error!("Failed to send data to the main world: {err}");
+        }
+    }
+
+    voxel_scene.info_copy_dest.unmap();
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
@@ -479,7 +671,13 @@ impl render_graph::Node for VoxelDrawNode {
                 let mut ready = 0;
 
                 if let CachedPipelineState::Ok(_) =
-                    pipeline_cache.get_compute_pipeline_state(voxel_pipelines.draw)
+                    pipeline_cache.get_compute_pipeline_state(voxel_pipelines.draw_leafs)
+                {
+                    ready += 1;
+                }
+
+                if let CachedPipelineState::Ok(_) =
+                    pipeline_cache.get_compute_pipeline_state(voxel_pipelines.draw_nodes)
                 {
                     ready += 1;
                 }
@@ -490,7 +688,7 @@ impl render_graph::Node for VoxelDrawNode {
                     ready += 1;
                 }
 
-                if ready == 2 {
+                if ready == 3 {
                     self.state = VoxelDrawState::Run;
                 }
             }
@@ -501,7 +699,13 @@ impl render_graph::Node for VoxelDrawNode {
                 let mut ready = 0;
 
                 if let CachedPipelineState::Ok(_) =
-                    pipeline_cache.get_compute_pipeline_state(voxel_pipelines.draw)
+                    pipeline_cache.get_compute_pipeline_state(voxel_pipelines.draw_leafs)
+                {
+                    ready += 1;
+                }
+
+                if let CachedPipelineState::Ok(_) =
+                    pipeline_cache.get_compute_pipeline_state(voxel_pipelines.draw_nodes)
                 {
                     ready += 1;
                 }
@@ -512,7 +716,7 @@ impl render_graph::Node for VoxelDrawNode {
                     ready += 1;
                 }
 
-                if ready != 2 {
+                if ready != 3 {
                     self.state = VoxelDrawState::Loading;
                 }
             }
@@ -565,6 +769,73 @@ impl render_graph::Node for VoxelDrawNode {
             );
         }
 
+        let world_min = UVec3::new(10, 10, 10);
+        let world_max = UVec3::new(100, 100, 100);
+        let mut dispatch_size_prev = UVec3::ZERO;
+
+        {
+            let mut pass =
+                render_context
+                    .command_encoder()
+                    .begin_compute_pass(&ComputePassDescriptor {
+                        label: "voxel_draw_leafs".into(),
+                        ..default()
+                    });
+
+            pass.set_pipeline(
+                pipeline_cache
+                    .get_compute_pipeline(voxel_pipelines.draw_leafs)
+                    .unwrap(),
+            );
+
+            pass.set_bind_group(0, &voxel_bind_group.0, &[]);
+
+            let min = world_min;
+            let max = world_max;
+            let depth = VOXEL_TREE_DEPTH - 1;
+
+            pass.set_push_constants(4 * 0, &(min.x as i32).to_ne_bytes());
+            pass.set_push_constants(4 * 1, &(min.y as i32).to_ne_bytes());
+            pass.set_push_constants(4 * 2, &(min.z as i32).to_ne_bytes());
+            pass.set_push_constants(4 * 3, &(0 as i32).to_ne_bytes());
+
+            pass.set_push_constants(4 * 4, &(max.x as i32).to_ne_bytes());
+            pass.set_push_constants(4 * 5, &(max.y as i32).to_ne_bytes());
+            pass.set_push_constants(4 * 6, &(max.z as i32).to_ne_bytes());
+            pass.set_push_constants(4 * 7, &(0 as i32).to_ne_bytes());
+
+            pass.set_push_constants(4 * 8, &(world_min.x as i32).to_ne_bytes());
+            pass.set_push_constants(4 * 9, &(world_min.y as i32).to_ne_bytes());
+            pass.set_push_constants(4 * 10, &(world_min.z as i32).to_ne_bytes());
+            pass.set_push_constants(4 * 11, &(0 as i32).to_ne_bytes());
+
+            pass.set_push_constants(4 * 12, &(world_max.x as i32).to_ne_bytes());
+            pass.set_push_constants(4 * 13, &(world_max.y as i32).to_ne_bytes());
+            pass.set_push_constants(4 * 14, &(world_max.z as i32).to_ne_bytes());
+            pass.set_push_constants(4 * 15, &(0 as i32).to_ne_bytes());
+
+            pass.set_push_constants(4 * 16, &(dispatch_size_prev.x as i32).to_ne_bytes());
+            pass.set_push_constants(4 * 17, &(dispatch_size_prev.y as i32).to_ne_bytes());
+            pass.set_push_constants(4 * 18, &(dispatch_size_prev.z as i32).to_ne_bytes());
+            pass.set_push_constants(4 * 19, &(0 as i32).to_ne_bytes());
+
+            pass.set_push_constants(4 * 20, &(depth as u32).to_ne_bytes());
+
+            let bound_min = min / WORKGROUP_SIZE * WORKGROUP_SIZE;
+            let bound_max =
+                (max + WORKGROUP_SIZE - UVec3::splat(1)) / WORKGROUP_SIZE * WORKGROUP_SIZE;
+
+            let dispatch_size = ((bound_max - bound_min) / WORKGROUP_SIZE).max(UVec3::ONE);
+
+            info!(
+                "draw_leafs; depth: {}, min: {}, max: {}, dispatch: {}, dispatch_prev: {}",
+                depth, min, max, dispatch_size, dispatch_size_prev,
+            );
+            pass.dispatch_workgroups(dispatch_size.x, dispatch_size.y, dispatch_size.z);
+
+            dispatch_size_prev = dispatch_size;
+        }
+
         {
             let mut pass =
                 render_context
@@ -576,16 +847,13 @@ impl render_graph::Node for VoxelDrawNode {
 
             pass.set_pipeline(
                 pipeline_cache
-                    .get_compute_pipeline(voxel_pipelines.draw)
+                    .get_compute_pipeline(voxel_pipelines.draw_nodes)
                     .unwrap(),
             );
 
             pass.set_bind_group(0, &voxel_bind_group.0, &[]);
 
-            let world_min = UVec3::new(0, 0, 0);
-            let world_max = UVec3::new(512, 512, 512);
-
-            for depth in 0..VOXEL_TREE_DEPTH {
+            for depth in (0..VOXEL_TREE_DEPTH - 1).rev() {
                 let size = (VOXEL_DIM as u32).pow((VOXEL_TREE_DEPTH - 1 - depth) as u32);
                 let min = world_min / size;
                 let max = (world_max - UVec3::ONE) / size + UVec3::ONE;
@@ -610,20 +878,38 @@ impl render_graph::Node for VoxelDrawNode {
                 pass.set_push_constants(4 * 14, &(world_max.z as i32).to_ne_bytes());
                 pass.set_push_constants(4 * 15, &(0 as i32).to_ne_bytes());
 
-                pass.set_push_constants(4 * 16, &(depth as u32).to_ne_bytes());
+                pass.set_push_constants(4 * 16, &(dispatch_size_prev.x as i32).to_ne_bytes());
+                pass.set_push_constants(4 * 17, &(dispatch_size_prev.y as i32).to_ne_bytes());
+                pass.set_push_constants(4 * 18, &(dispatch_size_prev.z as i32).to_ne_bytes());
+                pass.set_push_constants(4 * 19, &(0 as i32).to_ne_bytes());
 
-                let dispatch_size = ((max - min + WORKGROUP_SIZE - UVec3::splat(1))
-                    / WORKGROUP_SIZE)
-                    .max(UVec3::ONE);
+                pass.set_push_constants(4 * 20, &(depth as u32).to_ne_bytes());
+
+                let bound_min = min / WORKGROUP_SIZE * WORKGROUP_SIZE;
+                let bound_max =
+                    (max + WORKGROUP_SIZE - UVec3::splat(1)) / WORKGROUP_SIZE * WORKGROUP_SIZE;
+
+                let dispatch_size = ((bound_max - bound_min) / WORKGROUP_SIZE).max(UVec3::ONE);
 
                 info!(
-                    "Draw; depth: {}, min: {}, max: {}, dispatch: {}",
-                    depth, min, max, dispatch_size
+                    "draw_nodes; depth: {}, min: {}, max: {}, dispatch: {}, dispatch_prev: {}",
+                    depth, min, max, dispatch_size, dispatch_size_prev,
                 );
                 pass.dispatch_workgroups(dispatch_size.x, dispatch_size.y, dispatch_size.z);
-            }
 
-            Ok(())
+                dispatch_size_prev = dispatch_size;
+            }
         }
+
+        {
+            let src = voxel_scene.info.buffer().unwrap();
+            let dst = &voxel_scene.info_copy_dest;
+
+            render_context
+                .command_encoder()
+                .copy_buffer_to_buffer(src, 0, dst, 0, src.size());
+        }
+
+        Ok(())
     }
 }

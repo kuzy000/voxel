@@ -87,7 +87,7 @@ pub fn setup(mut commands: Commands) {
             parent
                 .spawn(NodeBundle {
                     style: Style {
-                        width: Val::Px(250.),
+                        width: Val::Px(400.),
                         margin: UiRect::bottom(Val::Px(15.)),
                         flex_direction: FlexDirection::Column,
                         ..default()
