@@ -248,8 +248,12 @@ struct QueryResult {
 // 0 <= depth < VOXEL_TREE_DEPTH
 fn query(pos: vec3i, depth: u32) -> QueryResult {
     var parent_idx = 0u;
-    var voxel_size = pow(f32(VOXEL_DIM), f32(depth));
+    var voxel_size = 1u; // pow(f32(VOXEL_DIM), f32(depth));
 
+    for (var i = 0u; i < depth; i++) {
+        voxel_size *= u32(VOXEL_DIM);
+    }
+    
     for (var i = 0u; i < depth; i++) {
         let lpos = (pos / vec3i(voxel_size)) % vec3i(VOXEL_DIM);
         let idx = pos_to_idx(lpos);
@@ -260,7 +264,7 @@ fn query(pos: vec3i, depth: u32) -> QueryResult {
         }
 
         parent_idx = child_idx;
-        voxel_size = voxel_size / f32(VOXEL_DIM);
+        voxel_size = voxel_size / u32(VOXEL_DIM);
     }
 
     let lpos = pos % vec3i(VOXEL_DIM);

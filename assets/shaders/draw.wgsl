@@ -98,7 +98,11 @@ var <workgroup> draw_buffer: array<u32, VOXEL_COUNT>;
 var <workgroup> num_different: atomic<u32>;
 var <workgroup> parent_ptr: u32;
 
-fn draw_inner(ipos: vec3i) -> u32 {
+fn draw_inner(ipos: vec3i, current: u32) -> u32 {
+    if (current != VOXEL_IDX_EMPTY) {
+        return current;
+    }
+
     let min = vox::push_constants.world_min.xyz;
     let max = vox::push_constants.world_max.xyz;
 
@@ -147,6 +151,7 @@ fn draw_leafs(
     
     let q = vox::query(ipos, depth);
     parent_ptr = q.parent_idx;
+
     if (parent_ptr != VOXEL_IDX_EMPTY) {
         draw_buffer[lidx] = vox::leafs[q.parent_idx].voxels[q.idx].color;
     }
@@ -157,10 +162,7 @@ fn draw_leafs(
     atomicStore(&num_different, 0u);
 
     if (all(ipos >= min) && all(ipos < max)) {
-        draw_buffer[lidx] = draw_inner(ipos);
-    }
-    else {
-        draw_buffer[lidx] = VOXEL_IDX_EMPTY;
+        draw_buffer[lidx] = draw_inner(ipos, draw_buffer[lidx]);
     }
 
     workgroupBarrier();
@@ -191,10 +193,10 @@ fn draw_leafs(
     // Allocate chunk in global memory
     if (lidx == 0 && parent_ptr == VOXEL_IDX_EMPTY) {
         parent_ptr = atomicAdd(&vox::info.leafs_len, 1u);
-        (*draw_area)[widx] = parent_ptr;
     }
     
     let gptr = workgroupUniformLoad(&parent_ptr);
+    (*draw_area)[widx] = parent_ptr;
     vox::leafs[gptr].voxels[lidx].color = draw_buffer[lidx];
 }
 
@@ -247,6 +249,7 @@ fn draw_nodes(
     
     let q = vox::query(ipos, depth);
     parent_ptr = q.parent_idx;
+
     if (parent_ptr != VOXEL_IDX_EMPTY) {
         draw_buffer[lidx] = vox::nodes[q.parent_idx].indices[q.idx];
     }
@@ -257,21 +260,10 @@ fn draw_nodes(
     atomicStore(&num_different, 0u);
     
     if (all(ipos >= min) && all(ipos < max)) {
-        //if (depth == u32(VOXEL_TREE_DEPTH) - 2u) {
-        if (1 == 1) {
-            let cpos = ipos - min;
+        let cpos = ipos - min;
 
-            let cidx = cpos.x * wsize_prev.y * wsize_prev.z + cpos.y * wsize_prev.z + cpos.z;
-            draw_buffer[lidx] = get_draw_area(draw_area_index_children, u32(cidx));
-        }
-        else {
-            let cpos = ipos - min;
-            let cidx = cpos.x * i32(VOXEL_DIM) * i32(VOXEL_DIM) + cpos.y * i32(VOXEL_DIM) + cpos.z;
-            draw_buffer[lidx] = get_draw_area(draw_area_index_children, u32(cidx));
-        }
-    }
-    else {
-        draw_buffer[lidx] = VOXEL_IDX_EMPTY;
+        let cidx = cpos.x * wsize_prev.y * wsize_prev.z + cpos.y * wsize_prev.z + cpos.z;
+        draw_buffer[lidx] = get_draw_area(draw_area_index_children, u32(cidx));
     }
 
     workgroupBarrier();
@@ -302,9 +294,9 @@ fn draw_nodes(
     // Allocate chunk in global memory
     if (lidx == 0 && parent_ptr == VOXEL_IDX_EMPTY) {
         parent_ptr = atomicAdd(&vox::info.nodes_len, 1u);
-        set_draw_area(draw_area_index, u32(widx), parent_ptr);
     }
     
     let gptr = workgroupUniformLoad(&parent_ptr);
+    set_draw_area(draw_area_index, u32(widx), parent_ptr);
     vox::nodes[gptr].indices[lidx] = draw_buffer[lidx];
 }

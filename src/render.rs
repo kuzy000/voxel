@@ -769,94 +769,32 @@ impl render_graph::Node for VoxelDrawNode {
             );
         }
 
-        let world_min = UVec3::new(10, 10, 10);
-        let world_max = UVec3::new(100, 100, 100);
-        let mut dispatch_size_prev = UVec3::ZERO;
+        for i in 0..3 {
+            let offset = UVec3::new(8, 8, 8) * i;
+            let world_min = UVec3::new(0, 0, 0) + offset;
+            let world_max = UVec3::new(16, 16, 16) + offset;
+            let mut dispatch_size_prev = UVec3::ZERO;
 
-        {
-            let mut pass =
-                render_context
-                    .command_encoder()
-                    .begin_compute_pass(&ComputePassDescriptor {
-                        label: "voxel_draw_leafs".into(),
-                        ..default()
-                    });
+            {
+                let mut pass =
+                    render_context
+                        .command_encoder()
+                        .begin_compute_pass(&ComputePassDescriptor {
+                            label: "voxel_draw_leafs".into(),
+                            ..default()
+                        });
 
-            pass.set_pipeline(
-                pipeline_cache
-                    .get_compute_pipeline(voxel_pipelines.draw_leafs)
-                    .unwrap(),
-            );
+                pass.set_pipeline(
+                    pipeline_cache
+                        .get_compute_pipeline(voxel_pipelines.draw_leafs)
+                        .unwrap(),
+                );
 
-            pass.set_bind_group(0, &voxel_bind_group.0, &[]);
+                pass.set_bind_group(0, &voxel_bind_group.0, &[]);
 
-            let min = world_min;
-            let max = world_max;
-            let depth = VOXEL_TREE_DEPTH - 1;
-
-            pass.set_push_constants(4 * 0, &(min.x as i32).to_ne_bytes());
-            pass.set_push_constants(4 * 1, &(min.y as i32).to_ne_bytes());
-            pass.set_push_constants(4 * 2, &(min.z as i32).to_ne_bytes());
-            pass.set_push_constants(4 * 3, &(0 as i32).to_ne_bytes());
-
-            pass.set_push_constants(4 * 4, &(max.x as i32).to_ne_bytes());
-            pass.set_push_constants(4 * 5, &(max.y as i32).to_ne_bytes());
-            pass.set_push_constants(4 * 6, &(max.z as i32).to_ne_bytes());
-            pass.set_push_constants(4 * 7, &(0 as i32).to_ne_bytes());
-
-            pass.set_push_constants(4 * 8, &(world_min.x as i32).to_ne_bytes());
-            pass.set_push_constants(4 * 9, &(world_min.y as i32).to_ne_bytes());
-            pass.set_push_constants(4 * 10, &(world_min.z as i32).to_ne_bytes());
-            pass.set_push_constants(4 * 11, &(0 as i32).to_ne_bytes());
-
-            pass.set_push_constants(4 * 12, &(world_max.x as i32).to_ne_bytes());
-            pass.set_push_constants(4 * 13, &(world_max.y as i32).to_ne_bytes());
-            pass.set_push_constants(4 * 14, &(world_max.z as i32).to_ne_bytes());
-            pass.set_push_constants(4 * 15, &(0 as i32).to_ne_bytes());
-
-            pass.set_push_constants(4 * 16, &(dispatch_size_prev.x as i32).to_ne_bytes());
-            pass.set_push_constants(4 * 17, &(dispatch_size_prev.y as i32).to_ne_bytes());
-            pass.set_push_constants(4 * 18, &(dispatch_size_prev.z as i32).to_ne_bytes());
-            pass.set_push_constants(4 * 19, &(0 as i32).to_ne_bytes());
-
-            pass.set_push_constants(4 * 20, &(depth as u32).to_ne_bytes());
-
-            let bound_min = min / WORKGROUP_SIZE * WORKGROUP_SIZE;
-            let bound_max =
-                (max + WORKGROUP_SIZE - UVec3::splat(1)) / WORKGROUP_SIZE * WORKGROUP_SIZE;
-
-            let dispatch_size = ((bound_max - bound_min) / WORKGROUP_SIZE).max(UVec3::ONE);
-
-            info!(
-                "draw_leafs; depth: {}, min: {}, max: {}, dispatch: {}, dispatch_prev: {}",
-                depth, min, max, dispatch_size, dispatch_size_prev,
-            );
-            pass.dispatch_workgroups(dispatch_size.x, dispatch_size.y, dispatch_size.z);
-
-            dispatch_size_prev = dispatch_size;
-        }
-
-        {
-            let mut pass =
-                render_context
-                    .command_encoder()
-                    .begin_compute_pass(&ComputePassDescriptor {
-                        label: "voxel_draw".into(),
-                        ..default()
-                    });
-
-            pass.set_pipeline(
-                pipeline_cache
-                    .get_compute_pipeline(voxel_pipelines.draw_nodes)
-                    .unwrap(),
-            );
-
-            pass.set_bind_group(0, &voxel_bind_group.0, &[]);
-
-            for depth in (0..VOXEL_TREE_DEPTH - 1).rev() {
-                let size = (VOXEL_DIM as u32).pow((VOXEL_TREE_DEPTH - 1 - depth) as u32);
-                let min = world_min / size;
-                let max = (world_max - UVec3::ONE) / size + UVec3::ONE;
+                let min = world_min;
+                let max = world_max;
+                let depth = VOXEL_TREE_DEPTH - 1;
 
                 pass.set_push_constants(4 * 0, &(min.x as i32).to_ne_bytes());
                 pass.set_push_constants(4 * 1, &(min.y as i32).to_ne_bytes());
@@ -892,22 +830,87 @@ impl render_graph::Node for VoxelDrawNode {
                 let dispatch_size = ((bound_max - bound_min) / WORKGROUP_SIZE).max(UVec3::ONE);
 
                 info!(
-                    "draw_nodes; depth: {}, min: {}, max: {}, dispatch: {}, dispatch_prev: {}",
+                    "draw_leafs; depth: {}, min: {}, max: {}, dispatch: {}, dispatch_prev: {}",
                     depth, min, max, dispatch_size, dispatch_size_prev,
                 );
                 pass.dispatch_workgroups(dispatch_size.x, dispatch_size.y, dispatch_size.z);
 
                 dispatch_size_prev = dispatch_size;
             }
-        }
 
-        {
-            let src = voxel_scene.info.buffer().unwrap();
-            let dst = &voxel_scene.info_copy_dest;
+            {
+                let mut pass =
+                    render_context
+                        .command_encoder()
+                        .begin_compute_pass(&ComputePassDescriptor {
+                            label: "voxel_draw".into(),
+                            ..default()
+                        });
 
-            render_context
-                .command_encoder()
-                .copy_buffer_to_buffer(src, 0, dst, 0, src.size());
+                pass.set_pipeline(
+                    pipeline_cache
+                        .get_compute_pipeline(voxel_pipelines.draw_nodes)
+                        .unwrap(),
+                );
+
+                pass.set_bind_group(0, &voxel_bind_group.0, &[]);
+
+                for depth in (0..VOXEL_TREE_DEPTH - 1).rev() {
+                    let size = (VOXEL_DIM as u32).pow((VOXEL_TREE_DEPTH - 1 - depth) as u32);
+                    let min = world_min / size;
+                    let max = (world_max - UVec3::ONE) / size + UVec3::ONE;
+
+                    pass.set_push_constants(4 * 0, &(min.x as i32).to_ne_bytes());
+                    pass.set_push_constants(4 * 1, &(min.y as i32).to_ne_bytes());
+                    pass.set_push_constants(4 * 2, &(min.z as i32).to_ne_bytes());
+                    pass.set_push_constants(4 * 3, &(0 as i32).to_ne_bytes());
+
+                    pass.set_push_constants(4 * 4, &(max.x as i32).to_ne_bytes());
+                    pass.set_push_constants(4 * 5, &(max.y as i32).to_ne_bytes());
+                    pass.set_push_constants(4 * 6, &(max.z as i32).to_ne_bytes());
+                    pass.set_push_constants(4 * 7, &(0 as i32).to_ne_bytes());
+
+                    pass.set_push_constants(4 * 8, &(world_min.x as i32).to_ne_bytes());
+                    pass.set_push_constants(4 * 9, &(world_min.y as i32).to_ne_bytes());
+                    pass.set_push_constants(4 * 10, &(world_min.z as i32).to_ne_bytes());
+                    pass.set_push_constants(4 * 11, &(0 as i32).to_ne_bytes());
+
+                    pass.set_push_constants(4 * 12, &(world_max.x as i32).to_ne_bytes());
+                    pass.set_push_constants(4 * 13, &(world_max.y as i32).to_ne_bytes());
+                    pass.set_push_constants(4 * 14, &(world_max.z as i32).to_ne_bytes());
+                    pass.set_push_constants(4 * 15, &(0 as i32).to_ne_bytes());
+
+                    pass.set_push_constants(4 * 16, &(dispatch_size_prev.x as i32).to_ne_bytes());
+                    pass.set_push_constants(4 * 17, &(dispatch_size_prev.y as i32).to_ne_bytes());
+                    pass.set_push_constants(4 * 18, &(dispatch_size_prev.z as i32).to_ne_bytes());
+                    pass.set_push_constants(4 * 19, &(0 as i32).to_ne_bytes());
+
+                    pass.set_push_constants(4 * 20, &(depth as u32).to_ne_bytes());
+
+                    let bound_min = min / WORKGROUP_SIZE * WORKGROUP_SIZE;
+                    let bound_max =
+                        (max + WORKGROUP_SIZE - UVec3::splat(1)) / WORKGROUP_SIZE * WORKGROUP_SIZE;
+
+                    let dispatch_size = ((bound_max - bound_min) / WORKGROUP_SIZE).max(UVec3::ONE);
+
+                    info!(
+                        "draw_nodes; depth: {}, min: {}, max: {}, dispatch: {}, dispatch_prev: {}",
+                        depth, min, max, dispatch_size, dispatch_size_prev,
+                    );
+                    pass.dispatch_workgroups(dispatch_size.x, dispatch_size.y, dispatch_size.z);
+
+                    dispatch_size_prev = dispatch_size;
+                }
+            }
+
+            {
+                let src = voxel_scene.info.buffer().unwrap();
+                let dst = &voxel_scene.info_copy_dest;
+
+                render_context
+                    .command_encoder()
+                    .copy_buffer_to_buffer(src, 0, dst, 0, src.size());
+            }
         }
 
         Ok(())
