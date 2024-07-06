@@ -6,6 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bevy = { version = "0.14.0-rc.4", features = ["file_watcher"] }
+bevy = { version = "0.14", features = ["file_watcher"] }
+bevy-inspector-egui = { git = "https://github.com/kristoff3r/bevy-inspector-egui" }
 crossbeam-channel = "0.5.13"
 dot_vox = "5.1.1"

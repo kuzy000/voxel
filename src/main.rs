@@ -13,6 +13,7 @@ use bevy::{
         SystemInformationDiagnosticsPlugin,
     },
     ecs::system::{lifetimeless::SRes, SystemParamItem},
+    input::{common_conditions::input_toggle_active, keyboard::Key},
     pbr::{DefaultOpaqueRendererMethod, DirectionalLightShadowMap},
     prelude::*,
     render::{
@@ -33,6 +34,7 @@ use bevy::{
     },
     window::WindowPlugin,
 };
+use bevy_inspector_egui::quick::WorldInspectorPlugin;
 use std::{borrow::Cow, fs};
 
 use camera::*;
@@ -80,6 +82,7 @@ fn main() {
             VoxelTracerPlugin,
             ui::GameUiPlugin,
         ))
+        .add_plugins(WorldInspectorPlugin::new().run_if(input_toggle_active(false, KeyCode::F1)))
         .add_systems(Startup, setup)
         .add_systems(Update, update_game_camera)
         .add_systems(Update, update_gizmos);
