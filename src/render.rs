@@ -106,13 +106,19 @@ impl VoxelWorldDiagnosticsPlugin {
     }
 }
 
+#[derive(Reflect, Clone, ShaderType, Debug)]
+pub struct GpuVoxelNode {
+    //pub mask: [u32; VOXEL_MASK_LEN],
+    pub indices: [u32; VOXEL_COUNT],
+}
+
 #[derive(Resource)]
 pub struct VoxelGpuScene {
     pub info: StorageBuffer<VoxelGpuSceneInfo>,
     pub info_copy_dest: Buffer,
 
     pub nodes: GpuBufferAllocator<VoxelNode>,
-    pub leafs: GpuBufferAllocator<VoxelLeaf>,
+    pub leafs: GpuBufferAllocator<GpuVoxelNode>,
 
     pub free_nodes: Buffer,
     pub free_leafs: Buffer,
@@ -131,7 +137,9 @@ impl FromWorld for VoxelGpuScene {
         let bytes_nodes = 256 * 1024 * 1024; // 256MiB
         let bytes_leafs = 2 * 1024 * 1024 * 1024; // 2GiB
 
-        let bytes_memlist: NonZeroU64 = (4 * 1024 * 1024).try_into().unwrap(); // 4MiB, can address 2GiB of chunks, 2048 bytes each
+        let bytes_memlist: u64 = 4 * 1024 * 1024; // 4MiB, can address 2GiB of chunks, 2048 bytes each
+
+        let bytes_drawarea: u64 = 16 * 1024 * 1024; // 16MiB, max dispatch is 128x128x128
 
         let num_nodes = bytes_nodes / std::mem::size_of::<VoxelNode>();
         let num_leafs = bytes_leafs / std::mem::size_of::<VoxelLeaf>();
@@ -182,28 +190,28 @@ impl FromWorld for VoxelGpuScene {
 
         let free_nodes = device.create_buffer(&BufferDescriptor {
             label: Some("voxel_free_nodes_buffer"),
-            size: bytes_memlist.into(),
+            size: bytes_memlist,
             usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
 
         let free_leafs = device.create_buffer(&BufferDescriptor {
             label: Some("voxel_free_leafs_buffer"),
-            size: bytes_memlist.into(),
+            size: bytes_memlist,
             usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
 
         let draw_area_0 = device.create_buffer(&BufferDescriptor {
             label: Some("voxel_draw_area_0_buffer"),
-            size: bytes_memlist.into(),
+            size: bytes_drawarea,
             usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
 
         let draw_area_1 = device.create_buffer(&BufferDescriptor {
             label: Some("voxel_draw_area_1_buffer"),
-            size: bytes_memlist.into(),
+            size: bytes_drawarea,
             usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
@@ -232,10 +240,10 @@ impl FromWorld for VoxelGpuScene {
                         storage_buffer::<VoxelGpuSceneInfo>(false),
                         storage_buffer_sized(false, Some(nodes_size)),
                         storage_buffer_sized(false, Some(leafs_size)),
-                        storage_buffer_sized(false, Some(bytes_memlist)), // free_nodes
-                        storage_buffer_sized(false, Some(bytes_memlist)), // free_leafs
-                        storage_buffer_sized(false, Some(bytes_memlist)), // draw_area_0
-                        storage_buffer_sized(false, Some(bytes_memlist)), // draw_area_1
+                        storage_buffer_sized(false, Some(bytes_memlist.try_into().unwrap())), // free_nodes
+                        storage_buffer_sized(false, Some(bytes_memlist.try_into().unwrap())), // free_leafs
+                        storage_buffer_sized(false, Some(bytes_drawarea.try_into().unwrap())), // draw_area_0
+                        storage_buffer_sized(false, Some(bytes_drawarea.try_into().unwrap())), // draw_area_1
                     ),
                 ),
             ),
@@ -609,32 +617,32 @@ impl RenderAsset for GpuVoxelTree {
         source_asset: Self::SourceAsset,
         (device, queue, gpu_scene): &mut SystemParamItem<Self::Param>,
     ) -> Result<Self, PrepareAssetError<Self::SourceAsset>> {
-        {
-            let gn = gpu_scene.nodes.size();
-            let gl = gpu_scene.leafs.size();
-
-            let sn = source_asset.nodes.len() as GpuIdx;
-            let sl = source_asset.leafs.len() as GpuIdx;
-
-            assert!(gn >= sn, "nodes {} >= {}", gn, sn);
-            assert!(gl >= sl, "leafs {} >= {}", gl, sl);
-        }
-
-        for node in &source_asset.nodes {
-            let idx = gpu_scene.nodes.alloc();
-            gpu_scene.nodes.write(idx, node, queue);
-        }
-
-        for leaf in &source_asset.leafs {
-            let idx = gpu_scene.leafs.alloc();
-            gpu_scene.leafs.write(idx, leaf, queue);
-        }
-
-        gpu_scene.info.get_mut().nodes_len = source_asset.nodes.len() as u32;
-        gpu_scene.info.get_mut().leafs_len = source_asset.leafs.len() as u32;
-        gpu_scene.info.write_buffer(device, queue);
-
-        info!("VoxelTree extracted; info: {:?}", &gpu_scene.info.get());
+//        {
+//            let gn = gpu_scene.nodes.size();
+//            let gl = gpu_scene.leafs.size();
+//
+//            let sn = source_asset.nodes.len() as GpuIdx;
+//            let sl = source_asset.leafs.len() as GpuIdx;
+//
+//            assert!(gn >= sn, "nodes {} >= {}", gn, sn);
+//            assert!(gl >= sl, "leafs {} >= {}", gl, sl);
+//        }
+//
+//        for node in &source_asset.nodes {
+//            let idx = gpu_scene.nodes.alloc();
+//            gpu_scene.nodes.write(idx, node, queue);
+//        }
+//
+//        for leaf in &source_asset.leafs {
+//            let idx = gpu_scene.leafs.alloc();
+//            gpu_scene.leafs.write(idx, leaf, queue);
+//        }
+//
+//        gpu_scene.info.get_mut().nodes_len = source_asset.nodes.len() as u32;
+//        gpu_scene.info.get_mut().leafs_len = source_asset.leafs.len() as u32;
+//        gpu_scene.info.write_buffer(device, queue);
+//
+//        info!("VoxelTree extracted; info: {:?}", &gpu_scene.info.get());
 
         Ok(Self)
     }
@@ -769,10 +777,10 @@ impl render_graph::Node for VoxelDrawNode {
             );
         }
 
-        for i in 0..3 {
-            let offset = UVec3::new(8, 8, 8) * i;
-            let world_min = UVec3::new(0, 0, 0) + offset;
-            let world_max = UVec3::new(16, 16, 16) + offset;
+        for i in 0..10 {
+            let offset = UVec3::splat(256) * i;
+            let world_min = UVec3::splat(0) + offset;
+            let world_max = UVec3::splat(1024) + offset;
             let mut dispatch_size_prev = UVec3::ZERO;
 
             {

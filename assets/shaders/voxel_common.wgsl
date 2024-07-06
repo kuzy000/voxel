@@ -7,7 +7,6 @@ const VOXEL_TREE_DEPTH: i32 = #{VOXEL_TREE_DEPTH};
 // const VOXEL_MASK_LEN: i32 = #{VOXEL_MASK_LEN};
 
 const VOXEL_IDX_EMPTY: u32 = #{VOXEL_IDX_EMPTY};
-const VOXEL_IDX_ALLOCATING: u32 = VOXEL_IDX_EMPTY - 1;
 
 const VOXEL_SIZES = array(
     VOXEL_SIZE * f32(pow(f32(VOXEL_DIM), f32(u32(VOXEL_TREE_DEPTH) - 0))),
@@ -21,4 +20,19 @@ const VOXEL_SIZES = array(
 
 fn pos_to_idx(ipos: vec3<i32>) -> u32 {
     return u32(ipos.x * VOXEL_DIM * VOXEL_DIM + ipos.y * VOXEL_DIM + ipos.z);
+}
+
+struct Voxel {
+    color: u32,
+}
+
+// TODO: rename to VoxelBrick or VoxelBlock or something like that
+struct VoxelLeaf {
+    voxels: array<Voxel, VOXEL_COUNT>,
+}
+
+struct VoxelNode {
+    leaf: u32, 
+    // Indices to either `nodes` or `leafs` depending on the current depth
+    indices: array<u32, VOXEL_COUNT>,
 }

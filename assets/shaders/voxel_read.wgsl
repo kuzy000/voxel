@@ -16,6 +16,9 @@
     VOXEL_SIZES,
     VOXEL_IDX_EMPTY,
     pos_to_idx,
+    Voxel,
+    VoxelLeaf,
+    VoxelNode
 }
 
 struct VoxelInfo {
@@ -24,21 +27,6 @@ struct VoxelInfo {
 
     leafs_len: u32,
     leafs_cap: u32,
-}
-
-struct Voxel {
-    color: u32,
-}
-
-struct VoxelLeaf {
-    // mask: array<u32, VOXEL_MASK_LEN>,
-    voxels: array<Voxel, VOXEL_COUNT>,
-}
-
-struct VoxelNode {
-    // mask: array<u32, VOXEL_MASK_LEN>,
-    // Indices to either `nodes` or `leafs` depending on the current depth
-    indices: array<u32, VOXEL_COUNT>,
 }
 
 @group(0) @binding(0) var<storage, read_write> info : VoxelInfo;
@@ -69,6 +57,18 @@ fn get_voxel_nodes(index: u32, ipos: vec3<i32>) -> bool {
     // return ((*node).mask[ti] & (1u << (i - oi))) > 0;
 
     return (*node).indices[i] != VOXEL_IDX_EMPTY;
+}
+
+fn get_voxel_nodes_lod(index: u32, ipos: vec3<i32>) -> u32 {
+    let i = pos_to_idx(ipos);
+    let node = &nodes[index];
+    
+    // let ti = i >> 5;
+    // let oi = ti * 32;
+    // 
+    // return ((*node).mask[ti] & (1u << (i - oi))) > 0;
+
+    return leafs[(*node).leaf].voxels[i].color;
 }
 
 struct RayMarchFrame {
@@ -184,12 +184,8 @@ fn trace(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
 
         let index = frames[depth].index;
         ipos = frames[depth].ipos;
-        // let lpos = frames[depth].local_pos;
 
         if (depth == VOXEL_TREE_DEPTH - 1) {
-            let index = frames[depth].index;
-            let ipos = frames[depth].ipos;
-            // let local_pos = frames[depth].local_pos;
             let tmax = frames[depth].tmax;
 
             // let color = vec3f(local_pos);
@@ -263,6 +259,30 @@ fn trace(pos: vec3<f32>, dir: vec3<f32>) -> RayMarchResult {
             // }
 
             continue;
+        }
+        else {
+            let tmax = frames[depth].tmax;
+
+            let voxel = get_voxel_nodes_lod(index, ipos);
+
+            // let color = vec3f(local_pos);
+            if (voxel != VOXEL_IDX_EMPTY) {
+                let normal = -normalize(vec3<f32>(mask) * vec3<f32>(istep));
+                let color = vec3f(unpack4x8unorm(voxel).xyz); //normal * .5 + .5;
+                // let color = vec3f(ipos) / 4.f;
+                
+                var distance = 0.f;
+                var voxel_size = VOXEL_SIZE;
+                for (var j = depth; j >= 0; j--) {
+                    //let tmax = frames[j].tmax_prev; accurate
+                    let tmax = frames[j].tmax;
+                    distance += min(tmax.x, min(tmax.y, tmax.z)) * voxel_size;
+                    voxel_size *= f32(VOXEL_DIM);
+                }
+                
+                let debug_alpha = 1. - pow(0.99, f32(i));
+                return RayMarchResult(normal, color, distance + inter_t, vec4f(1., 1., 1., debug_alpha));
+            }
         }
         
         let tmax = frames[depth].tmax;

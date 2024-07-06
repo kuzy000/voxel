@@ -21,82 +21,15 @@ fn clear_world(
     vox::clear(idx);
 }
 
-// @compute @workgroup_size(#{WG_X}, #{WG_Y}, #{WG_Z})
-// fn draw_old(
-//     @builtin(global_invocation_id) invocation_id: vec3<u32>,
-//     @builtin(num_workgroups) num_workgroups: vec3<u32>
-// ) {
-//     let min = vox::push_constants.min.xyz;
-//     let max = vox::push_constants.max.xyz;
-//     let depth = vox::push_constants.depth;
-// 
-//     var ipos = vec3i(invocation_id) + min;
-//     let ipos_real = ipos;
-//     if (any(ipos >= max)) {
-//         return;
-//     }
-//     
-//     if (depth == 5) {
-//         // Force previous LoD
-//         // ipos = ipos / 2 * 2;
-//     }
-// 
-//     let grad = vec3f(ipos - min) / vec3f(max - min - vec3i(1));
-//     let color = pack4x8unorm(vec4(grad, 0.));
-//     
-//     let voxel_size = VOXEL_SIZE * f32(pow(f32(VOXEL_DIM), f32(u32(VOXEL_TREE_DEPTH - 1) - depth)));
-//     
-//     let vmin = vec3f(ipos) * voxel_size;
-//     let vmax = vec3f(ipos + vec3i(1)) * voxel_size;
-//     
-//     let center = vmin + (vmax - vmin) * .5;
-//     
-//     let value = perlin_noise(center.xz, 0.01, 6, 0.5, 2.0, 13u);
-//     
-//     let world_value = (value * .5 + .5) * 100 + 50.;
-//     
-//     if ((center.y - world_value) < voxel_size * 2) {
-//         vox::place(ipos_real, color);
-//     }
-// 
-//     
-// //    let vmin = vec3f(ipos) * voxel_size;
-// //    let vmax = vec3f(ipos + vec3i(1)) * voxel_size;
-// //    
-// //    let center = vec3f(100, 100, 100);
-// //    let radius = 30.f;
-// //    
-// //    var smin = center - vmin;
-// //    var smax = center - vmax;
-// //    smin *= smin;
-// //    smax *= smax;
-// //    
-// //    let tmin = vec3f(center < vmin) * smin;
-// //    let tmax = vec3f(center > vmax) * smax;
-// //    
-// //    var ds = radius * radius;
-// //    ds -= tmin.x + tmin.y + tmin.z;
-// //    ds -= tmax.x + tmax.y + tmax.z;
-// //    
-// //    if (ds > 0.) {
-// //       vox::place(ipos, color);
-// //    }
-// 
-// //    let p = (vec3f(ipos) + vec3f(.5)) * voxel_size;
-// //    let d = sdf::sdf_world(p);
-// //    let voxel_box = sdf::sdf_box(vec3f(0.), vec3f(voxel_size));
-// //    
-// //    let r = max(voxel_box, d);
-// //    
-// //    if (r <= sqrt(2.) * voxel_size * .6f) {
-// //        vox::place(ipos, color);
-// //    }
-// }
-
-
 var <workgroup> draw_buffer: array<u32, VOXEL_COUNT>;
+var <workgroup> num_occupied: atomic<u32>;
 var <workgroup> num_different: atomic<u32>;
+var <workgroup> num_divided: atomic<u32>;
+var <workgroup> sum_r: atomic<u32>;
+var <workgroup> sum_g: atomic<u32>;
+var <workgroup> sum_b: atomic<u32>;
 var <workgroup> parent_ptr: u32;
+var <workgroup> lod_ptr: u32;
 
 fn draw_inner(ipos: vec3i, current: u32) -> u32 {
     if (current != VOXEL_IDX_EMPTY) {
@@ -107,14 +40,15 @@ fn draw_inner(ipos: vec3i, current: u32) -> u32 {
     let max = vox::push_constants.world_max.xyz;
 
     let grad = vec3f(ipos - min) / vec3f(max - min - vec3i(1));
-    let color = pack4x8unorm(vec4f(grad, 0.));
+    //let color = pack4x8unorm(vec4f(grad, 0.));
+    let color = pack4x8unorm(vec4f(1., 1., 1., 0.));
     
     if (2 == 1) {
         return color;
     }
 
     let center = min + (max - min) / 2;
-    let radius = (max - min) / 2 - 1;
+    let radius = (max - min) / 2 ;
 
     if (length(vec3f(ipos - center)) < f32(radius.x)) {
         return color;
@@ -147,8 +81,6 @@ fn draw_leafs(
     // Position in grid at current `depth`
     let ipos = (min / VOXEL_DIM) * VOXEL_DIM + gpos;
     
-    let draw_area = &vox::draw_area_0;
-    
     let q = vox::query(ipos, depth);
     parent_ptr = q.parent_idx;
 
@@ -156,10 +88,14 @@ fn draw_leafs(
         draw_buffer[lidx] = vox::leafs[q.parent_idx].voxels[q.idx].color;
     }
     else {
-        draw_buffer[lidx] = VOXEL_IDX_EMPTY;
+        draw_buffer[lidx] = q.value_if_empty;
     }
 
     atomicStore(&num_different, 0u);
+    atomicStore(&num_occupied, 0u);
+    atomicStore(&sum_r, 0u);
+    atomicStore(&sum_g, 0u);
+    atomicStore(&sum_b, 0u);
 
     if (all(ipos >= min) && all(ipos < max)) {
         draw_buffer[lidx] = draw_inner(ipos, draw_buffer[lidx]);
@@ -168,56 +104,66 @@ fn draw_leafs(
     workgroupBarrier();
 
     // TODO: LODs
-    // let lidx_next = (lidx + 1) % (VOXEL_DIM * VOXEL_DIM * VOXEL_DIM);
-    // if (draw_buffer[lidx] != draw_buffer[lidx_next]) {
-    //     atomicAdd(&num_different, 1u);
-    // }
+    let lidx_next = (lidx + 1) % (VOXEL_DIM * VOXEL_DIM * VOXEL_DIM);
+    if (draw_buffer[lidx] != draw_buffer[lidx_next]) {
+        atomicAdd(&num_different, 1u);
+    }
     
     // Simply calculate occupied cells
     if (draw_buffer[lidx] != VOXEL_IDX_EMPTY) {
-        atomicAdd(&num_different, 1u);
+        atomicAdd(&num_occupied, 1u);
+
+        let cur = vec3u(unpack4x8unorm(draw_buffer[lidx]).xyz * 255.f);
+        atomicAdd(&sum_r, cur.x);
+        atomicAdd(&sum_g, cur.y);
+        atomicAdd(&sum_b, cur.z);
     }
 
     workgroupBarrier();
     
-    if (atomicLoad(&num_different) == 0u) {
-        let value = draw_buffer[lidx]; // the same for the whole chunk
+    let num_occupied_v = atomicLoad(&num_occupied);
+    let num_different_v = atomicLoad(&num_different);
+
+    if (num_occupied_v == 0u) {
+        // let value = draw_buffer[lidx]; // the same for the whole chunk
         // if (value == VOXEL_IDX_EMPTY) { // it is always true
-            (*draw_area)[widx] = VOXEL_IDX_EMPTY;
+            // (*draw_area)[widx] = VOXEL_IDX_EMPTY;
         // }
 
+        vox::set_draw_area(0u, u32(widx), vox::DrawResult(VOXEL_IDX_EMPTY, VOXEL_IDX_EMPTY));
+        
         // TODO: destroy leaf if allocated
         return;
     }
     
+    let sum_color_u = vec3u(atomicLoad(&sum_r), atomicLoad(&sum_g), atomicLoad(&sum_b));
+    let mean_color = vec3f(sum_color_u) / f32(num_occupied_v) / 255.f;
+    var mean_color_u = pack4x8unorm(vec4f(mean_color, 0.));
+//    if (num_occupied_v < u32(VOXEL_COUNT) / 16u) {
+//        mean_color_u = VOXEL_IDX_EMPTY;
+//    }
+
+    if (num_different_v == 0u) {
+        // let value = draw_buffer[lidx]; // the same for the whole chunk
+        // if (value == VOXEL_IDX_EMPTY) { // it is always true
+            // (*draw_area)[widx] = VOXEL_IDX_EMPTY;
+        // }
+
+        vox::set_draw_area(0u, u32(widx), vox::DrawResult(VOXEL_IDX_EMPTY, mean_color_u));
+        
+        // TODO: destroy leaf if allocated
+        return;
+    }
+
     // Allocate chunk in global memory
     if (lidx == 0 && parent_ptr == VOXEL_IDX_EMPTY) {
         parent_ptr = atomicAdd(&vox::info.leafs_len, 1u);
     }
     
     let gptr = workgroupUniformLoad(&parent_ptr);
-    (*draw_area)[widx] = parent_ptr;
+    vox::set_draw_area(0u, u32(widx), vox::DrawResult(gptr, mean_color_u));
     vox::leafs[gptr].voxels[lidx].color = draw_buffer[lidx];
 }
-
-fn get_draw_area(draw_area_index: u32, index: u32) -> u32 {
-    if (draw_area_index == 0) {
-        return vox::draw_area_0[index];
-    }
-    else {
-        return vox::draw_area_1[index];
-    }
-}
-
-fn set_draw_area(draw_area_index: u32, index: u32, value: u32) {
-    if (draw_area_index == 0) {
-        vox::draw_area_0[index] = value;
-    }
-    else {
-        vox::draw_area_1[index] = value;
-    }
-}
-
 
 @compute @workgroup_size(VOXEL_DIM, VOXEL_DIM, VOXEL_DIM)
 fn draw_nodes(
@@ -250,53 +196,103 @@ fn draw_nodes(
     let q = vox::query(ipos, depth);
     parent_ptr = q.parent_idx;
 
+    var child_ptr: u32 = VOXEL_IDX_EMPTY;
     if (parent_ptr != VOXEL_IDX_EMPTY) {
-        draw_buffer[lidx] = vox::nodes[q.parent_idx].indices[q.idx];
+        child_ptr = vox::nodes[q.parent_idx].indices[q.idx];
+        lod_ptr = vox::nodes[q.parent_idx].leaf;
+        draw_buffer[lidx] = vox::leafs[lod_ptr].voxels[q.idx].color;
     }
     else {
-        draw_buffer[lidx] = VOXEL_IDX_EMPTY;
+        child_ptr = VOXEL_IDX_EMPTY;
+        lod_ptr = VOXEL_IDX_EMPTY;
+        draw_buffer[lidx] = q.value_if_empty;
     }
 
     atomicStore(&num_different, 0u);
+    atomicStore(&num_occupied, 0u);
+    atomicStore(&num_divided, 0u);
+    atomicStore(&sum_r, 0u);
+    atomicStore(&sum_g, 0u);
+    atomicStore(&sum_b, 0u);
     
     if (all(ipos >= min) && all(ipos < max)) {
         let cpos = ipos - min;
 
         let cidx = cpos.x * wsize_prev.y * wsize_prev.z + cpos.y * wsize_prev.z + cpos.z;
-        draw_buffer[lidx] = get_draw_area(draw_area_index_children, u32(cidx));
+        
+        let child_res = vox::get_draw_area(draw_area_index_children, u32(cidx));
+        child_ptr = child_res.idx;
+        draw_buffer[lidx] = child_res.value;
     }
 
     workgroupBarrier();
 
     // TODO: LODs
-    // let lidx_next = (lidx + 1) % (VOXEL_DIM * VOXEL_DIM * VOXEL_DIM);
-    // if (draw_buffer[lidx] != draw_buffer[lidx_next]) {
-    //     atomicAdd(&num_different, 1u);
-    // }
+    let lidx_next = (lidx + 1) % (VOXEL_DIM * VOXEL_DIM * VOXEL_DIM);
+    if (draw_buffer[lidx] != draw_buffer[lidx_next]) {
+        atomicAdd(&num_different, 1u);
+    }
     
     // Simply calculate occupied cells
     if (draw_buffer[lidx] != VOXEL_IDX_EMPTY) {
-        atomicAdd(&num_different, 1u);
+        atomicAdd(&num_occupied, 1u);
+
+        let cur = vec3u(unpack4x8unorm(draw_buffer[lidx]).xyz * 255.f);
+        atomicAdd(&sum_r, cur.x);
+        atomicAdd(&sum_g, cur.y);
+        atomicAdd(&sum_b, cur.z);
+    }
+    
+    if (child_ptr != VOXEL_IDX_EMPTY) {
+        atomicAdd(&num_divided, 1u);
     }
 
     workgroupBarrier();
     
-    if (atomicLoad(&num_different) == 0u) {
+    let num_occupied_v = atomicLoad(&num_occupied);
+    let num_different_v = atomicLoad(&num_different);
+    let num_divided_v = atomicLoad(&num_divided);
+    if (num_occupied_v == 0u) {
         let value = draw_buffer[lidx]; // the same for the whole chunk
         // if (value == VOXEL_IDX_EMPTY) { // it is always true
-            set_draw_area(draw_area_index, u32(widx), u32(VOXEL_IDX_EMPTY));
+            // set_draw_area(draw_area_index, u32(widx), u32(VOXEL_IDX_EMPTY));
+            vox::set_draw_area(draw_area_index, u32(widx), vox::DrawResult(VOXEL_IDX_EMPTY, VOXEL_IDX_EMPTY));
         // }
 
         // TODO: destroy leaf if allocated
         return;
     }
-    
+
+    let sum_color_u = vec3u(atomicLoad(&sum_r), atomicLoad(&sum_g), atomicLoad(&sum_b));
+    let mean_color = vec3f(sum_color_u) / f32(num_occupied_v) / 255.f;
+    var mean_color_u = pack4x8unorm(vec4f(mean_color, 0.));
+//    if (num_occupied_v < u32(VOXEL_COUNT) / 16u) {
+//        mean_color_u = VOXEL_IDX_EMPTY;
+//    }
+
+    if (num_different_v == 0u && num_divided_v == 0u) {
+        // let value = draw_buffer[lidx]; // the same for the whole chunk
+        // if (value == VOXEL_IDX_EMPTY) { // it is always true
+            // (*draw_area)[widx] = VOXEL_IDX_EMPTY;
+        // }
+
+        vox::set_draw_area(draw_area_index, u32(widx), vox::DrawResult(VOXEL_IDX_EMPTY, mean_color_u));
+        
+        // TODO: destroy leaf if allocated
+        return;
+    }
+
     // Allocate chunk in global memory
     if (lidx == 0 && parent_ptr == VOXEL_IDX_EMPTY) {
         parent_ptr = atomicAdd(&vox::info.nodes_len, 1u);
+        lod_ptr = atomicAdd(&vox::info.leafs_len, 1u);
     }
     
     let gptr = workgroupUniformLoad(&parent_ptr);
-    set_draw_area(draw_area_index, u32(widx), parent_ptr);
-    vox::nodes[gptr].indices[lidx] = draw_buffer[lidx];
+    let lptr = workgroupUniformLoad(&lod_ptr);
+
+    vox::set_draw_area(draw_area_index, u32(widx), vox::DrawResult(gptr, mean_color_u));
+    vox::nodes[gptr].leaf = lptr;
+    vox::nodes[gptr].indices[lidx] = child_ptr;
+    vox::leafs[lptr].voxels[lidx].color = draw_buffer[lidx];
 }
