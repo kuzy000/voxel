@@ -1,6 +1,9 @@
 #import voxel_tracer::common::RayMarchResult
 #import voxel_tracer::common::DST_MAX
-#import voxel_tracer::common::perlin_noise
+#import voxel_tracer::common::{
+    perlin_noise,
+    perlin_noise3,
+}
 #import voxel_tracer::sdf as sdf
 #import voxel_tracer::voxel_common::{
     VOXEL_TREE_DEPTH,
@@ -31,7 +34,8 @@ var <workgroup> sum_b: atomic<u32>;
 var <workgroup> parent_ptr: u32;
 var <workgroup> lod_ptr: u32;
 
-fn draw_inner(ipos: vec3i, current: u32) -> u32 {
+
+fn draw_inner_sphere(ipos: vec3i, current: u32) -> u32 {
     if (current != VOXEL_IDX_EMPTY) {
         return current;
     }
@@ -52,6 +56,56 @@ fn draw_inner(ipos: vec3i, current: u32) -> u32 {
 
     if (length(vec3f(ipos - center)) < f32(radius.x)) {
         return color;
+    }
+
+    return VOXEL_IDX_EMPTY;
+}
+
+fn draw_inner(ipos: vec3i, current: u32) -> u32 {
+    var PALETTE = array<u32, 8>(
+        0xd53e4f,
+        0xf46d43,
+        0xfdae61,
+        0xfee08b,
+        0xe6f598,
+        0xabdda4,
+        0x66c2a5,
+        0x3288bd,
+    );
+
+    if (current != VOXEL_IDX_EMPTY) {
+        return current;
+    }
+
+    let min = vox::push_constants.world_min.xyz;
+    let max = vox::push_constants.world_max.xyz;
+
+    let grad = vec3f(ipos - min) / vec3f(max - min - vec3i(1));
+    //let color = pack4x8unorm(vec4f(grad, 0.));
+    let color = pack4x8unorm(vec4f(1., 1., 1., 0.));
+    
+    if (2 == 1) {
+        return color;
+    }
+    
+    
+    let p = vec3f(ipos);
+    let lpos = p / vec3f(max - min);
+    
+    let lands = perlin_noise(p.xz, .0005, 6, .5, 2., 123u) * .5 + .5;
+    let caves = perlin_noise3(p, .002, 6, .5, 2., 123u) * .5 + .5;
+
+    if (lands > lpos.y && caves > 0.5) {
+        let c = (caves - .5) * 2.;
+        let cv = u32(c * 9.);
+        let cu = PALETTE[cv];
+        
+        let b = (cu >>  0u) & 0xFFu;
+        let g = (cu >>  8u) & 0xFFu;
+        let r = (cu >> 16u) & 0xFFu;
+        let col = vec3f(vec3u(r, g, b)) / 255.;
+
+        return pack4x8unorm(vec4f(col, 0.));
     }
 
     return VOXEL_IDX_EMPTY;

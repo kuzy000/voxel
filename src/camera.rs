@@ -18,9 +18,9 @@ pub fn update_game_camera(
     let mut transform = q.single_mut();
 
     let speed = if input.pressed(KeyCode::ShiftLeft) {
-        150.
+        500.
     } else {
-        50.
+        250.
     };
 
     let mut v = Vec3::ZERO;
