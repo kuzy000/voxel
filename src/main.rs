@@ -111,18 +111,19 @@ fn setup(
     std::mem::forget(asset_server.load::<Shader>("shaders/voxel_write.wgsl"));
     std::mem::forget(asset_server.load::<Shader>("shaders/draw.wgsl"));
     std::mem::forget(asset_server.load::<Shader>("shaders/draw_procedural.wgsl"));
+    std::mem::forget(asset_server.load::<Shader>("shaders/draw_import.wgsl"));
 
     let mut voxel_tree = VoxelTree::new(VOXEL_TREE_DEPTH as u8);
-    //gen_test_scene(&mut voxel_tree, 4i32.pow(DEPTH as u32), Vec3::new(1., 0.5, 1.));
+    // gen_test_scene(&mut voxel_tree, 4i32.pow(DEPTH as u32), Vec3::new(1., 0.5, 1.));
 
-    // let model_path = "assets/Church_Of_St_Sophia.vox";
+    let model_path = "assets/Church_Of_St_Sophia.vox";
     // let model_path = "assets/monu2.vox";
 
-    // let vox_model = dot_vox::load(model_path).expect("Failed to load");
-    // place_vox(&mut voxel_tree, &vox_model, IVec3::new(2000, 50, 2000));
+    let vox_model = dot_vox::load(model_path).expect("Failed to load");
+    place_vox(&mut voxel_tree, &vox_model, IVec3::new(2000, 50, 2000));
     // place_vox(&mut voxel_tree, &vox_model, IVec3::new(200, 50, 200));
 
-    // std::mem::forget(voxel_trees.add(voxel_tree));
+    std::mem::forget(voxel_trees.add(voxel_tree));
 
     // gltf
     commands.spawn(SceneBundle {
@@ -212,8 +213,11 @@ impl Plugin for VoxelTracerPlugin {
             );
 
         let mut render_graph = render_app.world_mut().resource_mut::<RenderGraph>();
-        render_graph.add_node(VoxelDrawNodeLabel, VoxelDrawNode::default());
-        render_graph.add_node_edge(VoxelDrawNodeLabel, CameraDriverLabel);
+        // render_graph.add_node(VoxelDrawNodeLabel, VoxelDrawNode::default());
+        // render_graph.add_node_edge(VoxelDrawNodeLabel, CameraDriverLabel);
+
+        render_graph.add_node(VoxelDrawImportNodeLabel, VoxelDrawImportNode::default());
+        render_graph.add_node_edge(VoxelDrawImportNodeLabel, CameraDriverLabel);
     }
 
     fn finish(&self, app: &mut App) {

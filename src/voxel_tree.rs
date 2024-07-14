@@ -15,6 +15,11 @@ pub fn pos_to_idx(ipos: IVec3) -> i32 {
     ipos.x * dim * dim + ipos.y * dim + ipos.z
 }
 
+pub fn idx_to_pos(idx: i32) -> IVec3 {
+    let dim = VOXEL_DIM as i32;
+    IVec3::new(idx / (dim * dim), (idx / dim) % dim, idx % dim)
+}
+
 #[derive(Reflect, Clone, Copy, Default, ShaderType, Debug)]
 pub struct Voxel {
     pub data: u32,
@@ -212,6 +217,61 @@ impl VoxelTree {
                 parent_idx = self.set_or_create_node(parent_idx, local_pos);
             }
         }
+    }
+
+    pub fn calc_bbox_leaf(&self, leaf_idx: u32) -> Option<(IVec3, IVec3)> {
+        if leaf_idx == VOXEL_IDX_EMPTY {
+            return None;
+        }
+
+        let leaf = &self.leafs[leaf_idx as usize];
+
+        let mut res = (IVec3::MAX, IVec3::MIN);
+        for (idx, voxel) in leaf.voxels.iter().enumerate() {
+            if voxel.data != VOXEL_IDX_EMPTY {
+                let pos = idx_to_pos(idx as i32);
+                res.0 = res.0.min(pos);
+                res.1 = res.1.max(pos + 1);
+            }
+        }
+
+        return if res.0 != IVec3::MAX { Some(res) } else { None };
+    }
+
+    pub fn calc_bbox_node(
+        &self,
+        node_idx: u32,
+        child_size: i32,
+        depth: u8,
+    ) -> Option<(IVec3, IVec3)> {
+        if node_idx == VOXEL_IDX_EMPTY {
+            return None;
+        }
+
+        let parent = &self.nodes[node_idx as usize];
+
+        let mut res = (IVec3::MAX, IVec3::MIN);
+        for (idx, child_idx) in parent.indices.iter().enumerate() {
+            if let Some((min, max)) = if depth == self.depth - 2 {
+                self.calc_bbox_leaf(*child_idx)
+            } else {
+                self.calc_bbox_node(*child_idx, child_size / (VOXEL_DIM as i32), depth + 1)
+            } {
+                let pos = idx_to_pos(idx as i32);
+                let offset = pos * child_size;
+
+                res.0 = res.0.min(offset + min);
+                res.1 = res.1.max(offset + max);
+            }
+        }
+
+        return if res.0 != IVec3::MAX { Some(res) } else { None };
+    }
+
+    pub fn calc_bbox(&self) -> Option<(UVec3, UVec3)> {
+        let child_size = (VOXEL_DIM as i32).pow(self.depth as u32 - 1);
+        self.calc_bbox_node(0, child_size, 0)
+            .map(|(min, max)| (min.try_into().unwrap(), max.try_into().unwrap()))
     }
 }
 
