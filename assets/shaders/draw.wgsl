@@ -1,3 +1,6 @@
+#define_import_path voxel_tracer::draw
+
+#import voxel_tracer::common::ComputeBuiltins
 #import voxel_tracer::common::RayMarchResult
 #import voxel_tracer::common::DST_MAX
 #import voxel_tracer::common::{
@@ -34,100 +37,24 @@ var <workgroup> sum_b: atomic<u32>;
 var <workgroup> parent_ptr: u32;
 var <workgroup> lod_ptr: u32;
 
-
-fn draw_inner_sphere(ipos: vec3i, current: u32) -> u32 {
-    if (current != VOXEL_IDX_EMPTY) {
-        return current;
-    }
-
-    let min = vox::push_constants.world_min.xyz;
-    let max = vox::push_constants.world_max.xyz;
-
-    let grad = vec3f(ipos - min) / vec3f(max - min - vec3i(1));
-    //let color = pack4x8unorm(vec4f(grad, 0.));
-    let color = pack4x8unorm(vec4f(1., 1., 1., 0.));
-    
-    if (2 == 1) {
-        return color;
-    }
-
-    let center = min + (max - min) / 2;
-    let radius = (max - min) / 2 ;
-
-    if (length(vec3f(ipos - center)) < f32(radius.x)) {
-        return color;
-    }
-
-    return VOXEL_IDX_EMPTY;
+struct DrawParams {
+    voxel: u32,
+    world_pos: vec3i, 
+    world_min: vec3i,
+    world_max: vec3i,
 }
 
-fn draw_inner(ipos: vec3i, current: u32) -> u32 {
-    var PALETTE = array<u32, 8>(
-        0xd53e4f,
-        0xf46d43,
-        0xfdae61,
-        0xfee08b,
-        0xe6f598,
-        0xabdda4,
-        0x66c2a5,
-        0x3288bd,
-    );
-
-    if (current != VOXEL_IDX_EMPTY) {
-        return current;
-    }
-
-    let min = vox::push_constants.world_min.xyz;
-    let max = vox::push_constants.world_max.xyz;
-
-    let grad = vec3f(ipos - min) / vec3f(max - min - vec3i(1));
-    //let color = pack4x8unorm(vec4f(grad, 0.));
-    let color = pack4x8unorm(vec4f(1., 1., 1., 0.));
-    
-    if (2 == 1) {
-        return color;
-    }
-    
-    
-    let p = vec3f(ipos);
-    let lpos = p / vec3f(max - min);
-    
-    let lands = perlin_noise(p.xz, .0005, 6, .5, 2., 123u) * .5 + .5;
-    let caves = perlin_noise3(p, .002, 6, .5, 2., 123u) * .5 + .5;
-
-    if (lands > lpos.y && caves > 0.5) {
-        let c = (caves - .5) * 2.;
-        let cv = u32(c * 9.);
-        let cu = PALETTE[cv];
-        
-        let b = (cu >>  0u) & 0xFFu;
-        let g = (cu >>  8u) & 0xFFu;
-        let r = (cu >> 16u) & 0xFFu;
-        let col = vec3f(vec3u(r, g, b)) / 255.;
-
-        return pack4x8unorm(vec4f(col, 0.));
-    }
-
-    return VOXEL_IDX_EMPTY;
-}
-
-@compute @workgroup_size(VOXEL_DIM, VOXEL_DIM, VOXEL_DIM)
-fn draw_leafs(
-    @builtin(local_invocation_id) lpos_u: vec3<u32>,
-    @builtin(global_invocation_id) gpos_u: vec3<u32>,
-    @builtin(workgroup_id) wpos_u: vec3<u32>,
-    @builtin(num_workgroups) wsize_u: vec3<u32>
-) {
+fn draw_begin(comp: ComputeBuiltins) -> DrawParams {
     let min = vox::push_constants.min.xyz;
     let max = vox::push_constants.max.xyz;
     let world_min = vox::push_constants.world_min.xyz;
     let world_max = vox::push_constants.world_max.xyz;
     let depth = vox::push_constants.depth;
 
-    let lpos = vec3i(lpos_u);
-    let gpos = vec3i(gpos_u);
-    let wpos = vec3i(wpos_u);
-    let wsize = vec3i(wsize_u);
+    let lpos = vec3i(comp.lpos_u);
+    let gpos = vec3i(comp.gpos_u);
+    let wpos = vec3i(comp.wpos_u);
+    let wsize = vec3i(comp.wsize_u);
 
     let lidx = lpos.x * VOXEL_DIM * VOXEL_DIM + lpos.y * VOXEL_DIM + lpos.z;
     let widx = wpos.x * wsize.z * wsize.y + wpos.y * wsize.z + wpos.z;
@@ -150,9 +77,30 @@ fn draw_leafs(
     atomicStore(&sum_r, 0u);
     atomicStore(&sum_g, 0u);
     atomicStore(&sum_b, 0u);
+    
+    return DrawParams(draw_buffer[lidx], ipos, world_min, world_max);
+}
+
+fn draw_end(comp: ComputeBuiltins, voxel: u32) {
+    let min = vox::push_constants.min.xyz;
+    let max = vox::push_constants.max.xyz;
+    let world_min = vox::push_constants.world_min.xyz;
+    let world_max = vox::push_constants.world_max.xyz;
+    let depth = vox::push_constants.depth;
+
+    let lpos = vec3i(comp.lpos_u);
+    let gpos = vec3i(comp.gpos_u);
+    let wpos = vec3i(comp.wpos_u);
+    let wsize = vec3i(comp.wsize_u);
+
+    let lidx = lpos.x * VOXEL_DIM * VOXEL_DIM + lpos.y * VOXEL_DIM + lpos.z;
+    let widx = wpos.x * wsize.z * wsize.y + wpos.y * wsize.z + wpos.z;
+    
+    // Position in grid at current `depth`
+    let ipos = (min / VOXEL_DIM) * VOXEL_DIM + gpos;
 
     if (all(ipos >= min) && all(ipos < max)) {
-        draw_buffer[lidx] = draw_inner(ipos, draw_buffer[lidx]);
+        draw_buffer[lidx] = voxel;
     }
 
     workgroupBarrier();

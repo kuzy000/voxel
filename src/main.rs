@@ -110,6 +110,7 @@ fn setup(
     std::mem::forget(asset_server.load::<Shader>("shaders/voxel_read.wgsl"));
     std::mem::forget(asset_server.load::<Shader>("shaders/voxel_write.wgsl"));
     std::mem::forget(asset_server.load::<Shader>("shaders/draw.wgsl"));
+    std::mem::forget(asset_server.load::<Shader>("shaders/draw_procedural.wgsl"));
 
     let mut voxel_tree = VoxelTree::new(VOXEL_TREE_DEPTH as u8);
     //gen_test_scene(&mut voxel_tree, 4i32.pow(DEPTH as u32), Vec3::new(1., 0.5, 1.));

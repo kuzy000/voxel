@@ -3,6 +3,13 @@
 const DST_MAX = 1e9f;
 const SPIN_LOCK_MAX = 2048;
 
+struct ComputeBuiltins {
+    lpos_u: vec3<u32>, // local_invocation_id
+    gpos_u: vec3<u32>, // global_invocation_id
+    wpos_u: vec3<u32>, // workgroup_id
+    wsize_u: vec3<u32> // num_workgroups
+}
+
 struct RayMarchResult {
     normal: vec3f,
     color: vec3f,

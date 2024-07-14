@@ -264,6 +264,7 @@ impl FromWorld for VoxelPipelines {
         let gpu_scene = world.resource::<VoxelGpuScene>();
         let shader_prepass = world.load_asset("shaders/voxel_prepass.wgsl");
         let shader_draw = world.load_asset("shaders/draw.wgsl");
+        let shader_draw_procedural = world.load_asset("shaders/draw_procedural.wgsl");
 
         let view_layout = gpu_scene.bind_group_layout_view.clone();
         let voxel_layout = gpu_scene.bind_group_layout_voxel.clone();
@@ -339,15 +340,15 @@ impl FromWorld for VoxelPipelines {
                 }),
             }),
             draw_leafs: pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
-                label: Some("voxel_draw_leafs_pipeline".into()),
+                label: Some("voxel_draw_pipeline".into()),
                 layout: vec![voxel_layout.clone()],
                 push_constant_ranges: vec![PushConstantRange {
                     stages: ShaderStages::COMPUTE,
                     range: 0..(4 * 4 * 6), // min: vec3i, max: vec3i, world_min: vec3i, world_max: vec3i, wsize_children: vec3i, depth: u32
                 }],
-                shader: shader_draw.clone(),
+                shader: shader_draw_procedural.clone(),
                 shader_defs: shader_defs_compute.clone(),
-                entry_point: "draw_leafs".into(),
+                entry_point: "draw".into(),
             }),
             draw_nodes: pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
                 label: Some("voxel_draw_nodes_pipeline".into()),
